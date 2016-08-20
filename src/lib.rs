@@ -1,6 +1,6 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-    }
-}
+mod reader;
+
+mod types;
+mod module;
+
+pub use module::Module;
