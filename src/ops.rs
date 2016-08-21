@@ -1,7 +1,7 @@
 use std::iter::{Iterator, IntoIterator};
 use std::{mem, fmt};
 
-use types::{Dynamic, Type, NoType};
+use types::{Dynamic, Type, NoType, IntType, FloatType};
 use module::{FunctionIndex, TableIndex, ImportIndex};
 use reader::Reader;
 
@@ -187,12 +187,6 @@ pub enum Sign {
 }
 
 #[derive(Copy, Clone)]
-pub enum IntType {
-    Int32,
-    Int64
-}
-
-#[derive(Copy, Clone)]
 pub enum Size {
     I8,
     I16,
@@ -201,15 +195,9 @@ pub enum Size {
 }
 
 #[derive(Copy, Clone)]
-pub enum FloatType {
-    Float32,
-    Float64
-}
-
-#[derive(Copy, Clone)]
 pub struct MemImm {
-    log_of_alignment: u32,
-    offset: u32
+    pub log_of_alignment: u32,
+    pub offset: u32
 }
 
 fn read_mem_imm<'a>(reader: &mut Reader<'a>) -> MemImm {
@@ -431,7 +419,8 @@ fn with_indent<'a>(indent: usize, text: &str, f: &mut fmt::Formatter) -> Result<
 
 fn write_indented_ops<'a>(ops: &[BlockOp<'a>], f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
     for o in ops {
-        try!(with_indent(2, &format!("{}\n", o), f));
+        try!(with_indent(2, &format!("{}", o), f));
+        writeln!(f, "");
     }
     Ok(())
 }

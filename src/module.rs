@@ -35,8 +35,8 @@ pub struct ImportIndex(pub usize);
 
 #[derive(Copy, Clone)]
 pub struct FunctionType<'a> {
-    param_types: &'a[Type],
-    return_type: Option<Type>
+    pub param_types: &'a[Type],
+    pub return_type: Option<Type>
 }
 
 impl<'a> fmt::Display for FunctionType<'a> {
@@ -402,7 +402,7 @@ impl<'a> Module<'a> {
         panic!("missing critical chunk!");
     }
 
-    fn find(&self, name: &str) -> Option<FunctionIndex> {
+    pub fn find(&self, name: &str) -> Option<FunctionIndex> {
         for e in &self.exports {
             if e.function_name == name {
                 return Some(e.function_index);
@@ -411,7 +411,7 @@ impl<'a> Module<'a> {
         None
     }
 
-    fn find_name(&self, index: FunctionIndex) -> Option<&'a str> {
+    pub fn find_name(&self, index: FunctionIndex) -> Option<&'a str> {
         for e in &self.exports {
             if e.function_index == index {
                 return Some(e.function_name);

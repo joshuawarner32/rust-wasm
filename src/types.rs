@@ -30,6 +30,36 @@ impl fmt::Display for Type {
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum IntType {
+    Int32,
+    Int64
+}
+
+impl IntType {
+    pub fn to_type(self) -> Type {
+        match self {
+            IntType::Int32 => Type::Int32,
+            IntType::Int64 => Type::Int64,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum FloatType {
+    Float32,
+    Float64
+}
+
+impl FloatType {
+    pub fn to_type(self) -> Type {
+        match self {
+            FloatType::Float32 => Type::Float32,
+            FloatType::Float64 => Type::Float64,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Dynamic {
     Int32(Wrapping<u32>),
@@ -89,27 +119,53 @@ impl fmt::Display for NoType {
 }
 
 impl Dynamic {
-    pub fn to_u32(self) -> Wrapping<u32> {
+    pub fn to_wu32(self) -> Wrapping<u32> {
         match self {
             Dynamic::Int32(v) => v,
             _ => panic!()
         }
     }
-    pub fn to_u64(self) -> Wrapping<u64> {
+    pub fn to_wu64(self) -> Wrapping<u64> {
         match self {
             Dynamic::Int64(v) => v,
             _ => panic!()
         }
     }
-    pub fn to_i32(self) -> Wrapping<i32> {
+    pub fn to_wi32(self) -> Wrapping<i32> {
         match self {
             Dynamic::Int32(v) => Wrapping(v.0 as i32),
             _ => panic!()
         }
     }
-    pub fn to_i64(self) -> Wrapping<i64> {
+    pub fn to_wi64(self) -> Wrapping<i64> {
         match self {
             Dynamic::Int64(v) => Wrapping(v.0 as i64),
+            _ => panic!()
+        }
+    }
+    pub fn to_u32(self) -> u32 {
+        self.to_wu32().0
+    }
+    pub fn to_u64(self) -> u64 {
+        self.to_wu64().0
+    }
+    pub fn to_i32(self) -> i32 {
+        self.to_wi32().0
+    }
+    pub fn to_i64(self) -> i64 {
+        self.to_wi64().0
+    }
+    pub fn to_int(self) -> Wrapping<u64> {
+        match self {
+            Dynamic::Int32(v) => Wrapping(v.0 as u64),
+            Dynamic::Int64(v) => v,
+            _ => panic!()
+        }
+    }
+    pub fn to_float(self) -> f64 {
+        match self {
+            Dynamic::Float32(v) => v as f64,
+            Dynamic::Float64(v) => v,
             _ => panic!()
         }
     }
@@ -130,6 +186,24 @@ impl Dynamic {
     }
     pub fn from_i64(val: i64) -> Dynamic {
         Dynamic::Int64(Wrapping(val as u64))
+    }
+    pub fn from_u32(val: u32) -> Dynamic {
+        Dynamic::Int32(Wrapping(val))
+    }
+    pub fn from_u64(val: u64) -> Dynamic {
+        Dynamic::Int64(Wrapping(val))
+    }
+    pub fn from_float(ty: FloatType, val: f64) -> Dynamic {
+        match ty {
+            FloatType::Float32 => Dynamic::Float32(val as f32),
+            FloatType::Float64 => Dynamic::Float64(val),
+        }
+    }
+    pub fn from_int(ty: IntType, val: u64) -> Dynamic {
+        match ty {
+            IntType::Int32 => Dynamic::Int32(Wrapping(val as u32)),
+            IntType::Int64 => Dynamic::Int64(Wrapping(val)),
+        }
     }
 
     pub fn get_type(&self) -> Type {
