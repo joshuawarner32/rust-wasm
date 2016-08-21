@@ -9,6 +9,7 @@ use std::num::Wrapping;
 
 use types::{Type, Pr};
 use reader::Reader;
+use ops::LinearOpReader;
 
 struct Chunk<'a> {
     name: &'a str,
@@ -25,6 +26,12 @@ fn read_chunk<'a>(reader: &mut Reader<'a>) -> Chunk<'a> {
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct FunctionIndex(pub usize);
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct TableIndex(pub usize);
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct ImportIndex(pub usize);
 
 #[derive(Copy, Clone)]
 pub struct FunctionType<'a> {
@@ -63,6 +70,12 @@ pub struct Export<'a> {
 pub struct FunctionBody<'a> {
     pub locals: Vec<(Type, usize)>,
     pub ast: &'a [u8]
+}
+
+impl<'a> FunctionBody<'a> {
+    pub fn linear_ops(&self) -> LinearOpReader {
+        LinearOpReader::new(self.ast)
+    }
 }
 
 pub struct MemoryChunk<'a> {
@@ -298,7 +311,7 @@ impl<'a> Module<'a> {
                             for _ in 0..local_type_count {
                                 let count_of_this_type = r.read_var_u32() as usize;
                                 let ty = Type::from_u8(r.read_u8());
-                                locals.push((ty, count_of_this_type)); 
+                                locals.push((ty, count_of_this_type));
                             }
 
                             let ast = r.into_remaining();
@@ -340,7 +353,7 @@ impl<'a> Module<'a> {
                         let fn_name = r.read_str();
                         let local_count = r.read_var_i32() as usize;
                         let mut local_names = Vec::with_capacity(local_count);
-                        
+
                         for _ in 0..local_count {
                             local_names.push(r.read_str());
                         }

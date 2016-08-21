@@ -5,6 +5,11 @@ pub struct Reader<'a> {
     pos: usize
 }
 
+#[derive(Debug)]
+enum ReadError {
+    BadVarInt1(u32)
+}
+
 impl<'a> Reader<'a> {
     pub fn new(buf: &'a [u8]) -> Reader<'a> {
         Reader {
@@ -62,6 +67,15 @@ impl<'a> Reader<'a> {
         res
     }
 
+    pub fn read_var_u1(&mut self) -> Result<bool, ReadError> {
+        let r = self.read_var_u32();
+        match r {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(ReadError::BadVarInt1(r)),
+        }
+    }
+
     pub fn read_var_u64(&mut self) -> u64 {
         let mut res = 0;
         let mut shift = 0;
@@ -81,6 +95,23 @@ impl<'a> Reader<'a> {
         let mut shift = 0;
         loop {
             let b = self.read_u8() as i32;
+            res |= (b & 0x7f) << shift;
+            shift += 7;
+            if (b & 0x80) == 0 {
+                if shift < 31 && (b & 0x40) != 0 {
+                    res |= -(1 << shift);
+                }
+                break;
+            }
+        }
+        res
+    }
+
+    pub fn read_var_i64(&mut self) -> i64 {
+        let mut res = 0i64;
+        let mut shift = 0;
+        loop {
+            let b = self.read_u8() as i64;
             res |= (b & 0x7f) << shift;
             shift += 7;
             if (b & 0x80) == 0 {
@@ -115,5 +146,13 @@ impl<'a> Reader<'a> {
 
     pub fn at_eof(&self) -> bool {
         self.pos >= self.buf.len()
+    }
+
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+
+    pub fn len(&self) -> usize {
+        self.buf.len()
     }
 }

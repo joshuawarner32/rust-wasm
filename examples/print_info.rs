@@ -31,6 +31,16 @@ fn main() {
     for (i, f) in m.functions.iter().enumerate() {
         let name = m.names.get(i).map(|e| e.function_name).unwrap_or("<unnamed>");
         println!("  {}{}", name, f);
+
+        let code = &m.code[i];
+
+        for l in &code.locals {
+            println!("    local {}[{}]", l.0, l.1);
+        }
+
+        for l in code.linear_ops() {
+            println!("    {}", l);
+        }
     }
 
     println!("exports:");
@@ -60,11 +70,6 @@ fn main() {
     } else {
         println!("  (None)");
     }
-
-    // println!("code:");
-    // for c in m.code {
-    //     code //: Vec<FunctionBody<'a>>,
-    // }
 
     println!("initial memory:");
     for ch in &m.memory_chunks {

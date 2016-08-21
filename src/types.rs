@@ -75,6 +75,19 @@ impl fmt::Display for Pr<Option<Type>> {
     }
 }
 
+pub struct NoType(pub Dynamic);
+
+impl fmt::Display for NoType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self.0 {
+            Dynamic::Int32(val) => write!(f, "{}", val),
+            Dynamic::Int64(val) => write!(f, "{}", val),
+            Dynamic::Float32(val) => write!(f, "{}", val),
+            Dynamic::Float64(val) => write!(f, "{}", val),
+        }
+    }
+}
+
 impl Dynamic {
     pub fn to_u32(self) -> Wrapping<u32> {
         match self {
@@ -110,6 +123,21 @@ impl Dynamic {
         match self {
             Dynamic::Float64(v) => v,
             _ => panic!()
+        }
+    }
+    pub fn from_i32(val: i32) -> Dynamic {
+        Dynamic::Int32(Wrapping(val as u32))
+    }
+    pub fn from_i64(val: i64) -> Dynamic {
+        Dynamic::Int64(Wrapping(val as u64))
+    }
+
+    pub fn get_type(&self) -> Type {
+        match self {
+            &Dynamic::Int32(val) => Type::Int32,
+            &Dynamic::Int64(val) => Type::Int64,
+            &Dynamic::Float32(val) => Type::Float32,
+            &Dynamic::Float64(val) => Type::Float64,
         }
     }
 }
