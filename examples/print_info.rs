@@ -38,8 +38,8 @@ fn main() {
             println!("    local {}[{}]", l.0, l.1);
         }
 
-        for l in code.linear_ops() {
-            println!("    {}", l);
+        for l in code.block_ops() {
+            println!("{}", wasm::ops::Indented(4, l));
         }
     }
 

@@ -293,12 +293,8 @@ pub enum FloatCmpOp {
     Ge,
 }
 
-pub enum LinearOp<'a> {
+pub enum NormalOp<'a> {
     Nop,
-    Block,
-    Loop,
-    If,
-    Else,
     Select,
     Br{has_arg: bool, relative_depth: u32},
     BrIf{has_arg: bool, relative_depth: u32},
@@ -306,8 +302,6 @@ pub enum LinearOp<'a> {
     Return{has_arg: bool},
     Unreachable,
     Drop,
-    End,
-
     Const(Dynamic),
     GetLocal(usize),
     SetLocal(usize),
@@ -338,51 +332,139 @@ pub enum LinearOp<'a> {
     Reinterpret(Type, Type),
 }
 
+
+
+pub enum LinearOp<'a> {
+    Block,
+    Loop,
+    If,
+    Else,
+    End,
+    Normal(NormalOp<'a>),
+}
+
+pub enum BlockOp<'a> {
+    Block(Block<'a>),
+    Normal(NormalOp<'a>),
+}
+
+pub enum Block<'a> {
+    Block(Vec<BlockOp<'a>>),
+    Loop(Vec<BlockOp<'a>>),
+    If(Vec<BlockOp<'a>>, Vec<BlockOp<'a>>),
+}
+
 impl<'a> fmt::Display for LinearOp<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            &LinearOp::Nop => write!(f, "nop"),
             &LinearOp::Block => write!(f, "block"),
             &LinearOp::Loop => write!(f, "loop"),
             &LinearOp::If => write!(f, "if"),
             &LinearOp::Else => write!(f, "else"),
-            &LinearOp::Select => write!(f, "select"),
-            &LinearOp::Br{has_arg: _, relative_depth: _} => write!(f, "br"),
-            &LinearOp::BrIf{has_arg: _, relative_depth: _} => write!(f, "br_if"),
-            &LinearOp::BrTable{has_arg: _, target_data: _, default: _} => write!(f, "br_table"),
-            &LinearOp::Return{has_arg} => write!(f, "return {}", if has_arg { "arg" } else { "" }),
-            &LinearOp::Unreachable => write!(f, "unreachable"),
-            &LinearOp::Drop => write!(f, "drop"),
             &LinearOp::End => write!(f, "end"),
+            &LinearOp::Normal(ref x) => write!(f, "{}", x),
+        }
+    }
+}
 
-            &LinearOp::Const(val) => write!(f, "{}.const {}", val.get_type(), NoType(val)),
-            &LinearOp::GetLocal(index) => write!(f, "get_local {}", index),
-            &LinearOp::SetLocal(index) => write!(f, "set_local {}", index),
-            &LinearOp::TeeLocal(index) => write!(f, "tee_local {}", index),
-            &LinearOp::Call{argument_count, index} => write!(f, "call {} {}", argument_count, index.0),
-            &LinearOp::CallIndirect{argument_count, index} => write!(f, "call_indirect {} {}", argument_count, index.0),
-            &LinearOp::CallImport{argument_count, index} => write!(f, "call_import {} {}", argument_count, index.0),
-            &LinearOp::IntLoad(IntType, Sign, Size, MemImm) => write!(f, "IntLoad"),
-            &LinearOp::FloatLoad(FloatType, MemImm) => write!(f, "FloatLoad"),
-            &LinearOp::IntStore(IntType, Size, MemImm) => write!(f, "IntStore"),
-            &LinearOp::FloatStore(FloatType, MemImm) => write!(f, "FloatStore"),
+impl<'a> fmt::Display for NormalOp<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            &NormalOp::Nop => write!(f, "nop"),
+            &NormalOp::Select => write!(f, "select"),
+            &NormalOp::Br{has_arg: _, relative_depth: _} => write!(f, "br"),
+            &NormalOp::BrIf{has_arg: _, relative_depth: _} => write!(f, "br_if"),
+            &NormalOp::BrTable{has_arg: _, target_data: _, default: _} => write!(f, "br_table"),
+            &NormalOp::Return{has_arg} => write!(f, "return {}", if has_arg { "arg" } else { "" }),
+            &NormalOp::Unreachable => write!(f, "unreachable"),
+            &NormalOp::Drop => write!(f, "drop"),
 
-            &LinearOp::CurrentMemory => write!(f, "CurrentMemory"),
-            &LinearOp::GrowMemory => write!(f, "GrowMemory"),
+            &NormalOp::Const(val) => write!(f, "{}.const {}", val.get_type(), NoType(val)),
+            &NormalOp::GetLocal(index) => write!(f, "get_local {}", index),
+            &NormalOp::SetLocal(index) => write!(f, "set_local {}", index),
+            &NormalOp::TeeLocal(index) => write!(f, "tee_local {}", index),
+            &NormalOp::Call{argument_count, index} => write!(f, "call {} {}", argument_count, index.0),
+            &NormalOp::CallIndirect{argument_count, index} => write!(f, "call_indirect {} {}", argument_count, index.0),
+            &NormalOp::CallImport{argument_count, index} => write!(f, "call_import {} {}", argument_count, index.0),
+            &NormalOp::IntLoad(IntType, Sign, Size, MemImm) => write!(f, "IntLoad"),
+            &NormalOp::FloatLoad(FloatType, MemImm) => write!(f, "FloatLoad"),
+            &NormalOp::IntStore(IntType, Size, MemImm) => write!(f, "IntStore"),
+            &NormalOp::FloatStore(FloatType, MemImm) => write!(f, "FloatStore"),
 
-            &LinearOp::IntBin(IntType, IntBinOp) => write!(f, "IntBin"),
-            &LinearOp::IntCmp(IntType, IntCmpOp) => write!(f, "IntCmp"),
-            &LinearOp::IntUn(IntType, IntUnOp) => write!(f, "IntUn"),
-            &LinearOp::IntEqz(IntType) => write!(f, "IntEqz"),
-            &LinearOp::FloatBin(FloatType, FloatBinOp) => write!(f, "FloatBin"),
-            &LinearOp::FloatUn(FloatType, FloatUnOp) => write!(f, "FloatUn"),
-            &LinearOp::FloatCmp(FloatType, FloatCmpOp) => write!(f, "FloatCmp"),
-            &LinearOp::FloatToInt(FloatType, IntType, Sign) => write!(f, "FloatToInt"),
-            &LinearOp::IntExtend(Sign) => write!(f, "IntExtend"),
-            &LinearOp::IntTruncate => write!(f, "IntTruncate"),
-            &LinearOp::IntToFloat(IntType, Sign, FloatType) => write!(f, "IntToFloat"),
-            &LinearOp::FloatConvert(FloatType) => write!(f, "FloatConvert"),
-            &LinearOp::Reinterpret(Type, Type2) => write!(f, "Reinterpret"),
+            &NormalOp::CurrentMemory => write!(f, "CurrentMemory"),
+            &NormalOp::GrowMemory => write!(f, "GrowMemory"),
+
+            &NormalOp::IntBin(IntType, IntBinOp) => write!(f, "IntBin"),
+            &NormalOp::IntCmp(IntType, IntCmpOp) => write!(f, "IntCmp"),
+            &NormalOp::IntUn(IntType, IntUnOp) => write!(f, "IntUn"),
+            &NormalOp::IntEqz(IntType) => write!(f, "IntEqz"),
+            &NormalOp::FloatBin(FloatType, FloatBinOp) => write!(f, "FloatBin"),
+            &NormalOp::FloatUn(FloatType, FloatUnOp) => write!(f, "FloatUn"),
+            &NormalOp::FloatCmp(FloatType, FloatCmpOp) => write!(f, "FloatCmp"),
+            &NormalOp::FloatToInt(FloatType, IntType, Sign) => write!(f, "FloatToInt"),
+            &NormalOp::IntExtend(Sign) => write!(f, "IntExtend"),
+            &NormalOp::IntTruncate => write!(f, "IntTruncate"),
+            &NormalOp::IntToFloat(IntType, Sign, FloatType) => write!(f, "IntToFloat"),
+            &NormalOp::FloatConvert(FloatType) => write!(f, "FloatConvert"),
+            &NormalOp::Reinterpret(Type, Type2) => write!(f, "Reinterpret"),
+        }
+    }
+}
+
+pub struct Indented<T: fmt::Display>(pub usize, pub T);
+
+impl<T: fmt::Display> fmt::Display for Indented<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        // Caution!!! This could get expensive if printing recursively!!!
+        with_indent(self.0, &format!("{}", self.1), f)
+    }
+}
+
+fn with_indent<'a>(indent: usize, text: &str, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    // Caution!!! This could get expensive if printing recursively!!!
+    let itext = ::std::iter::repeat(' ').take(indent).collect::<String>();
+    for (i, l) in text.split('\n').enumerate() {
+        try!(write!(f, "{}{}{}", if i > 0 { "\n" } else { "" }, itext, l));
+    }
+    Ok(())
+}
+
+fn write_indented_ops<'a>(ops: &[BlockOp<'a>], f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    for o in ops {
+        try!(with_indent(2, &format!("{}\n", o), f));
+    }
+    Ok(())
+}
+
+impl<'a> fmt::Display for Block<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            &Block::Block(ref ops) => {
+                try!(writeln!(f, "block"));
+                write_indented_ops(ops, f)
+            }
+            &Block::Loop(ref ops) => {
+                try!(writeln!(f, "loop"));
+                write_indented_ops(ops, f)
+            }
+            &Block::If(ref then, ref otherwise) => {
+                try!(writeln!(f, "if"));
+                try!(write_indented_ops(then, f));
+                if otherwise.len() > 0 {
+                    try!(writeln!(f, "else"));
+                    try!(write_indented_ops(otherwise, f))
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl<'a> fmt::Display for BlockOp<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            &BlockOp::Block(ref b) => write!(f, "{}", b),
+            &BlockOp::Normal(ref n) => write!(f, "{}", n),
         }
     }
 }
@@ -402,233 +484,323 @@ impl<'a> LinearOpReader<'a> {
 impl<'a> Iterator for LinearOpReader<'a> {
     type Item = LinearOp<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.r.at_eof() {
-            None
-        } else {
-            let b = self.r.read_u8();
-            Some(match b {
-                0x00 => LinearOp::Nop,
-                0x01 => LinearOp::Block,
-                0x02 => LinearOp::Loop,
-                0x03 => LinearOp::If,
-                0x04 => LinearOp::Else,
-                0x05 => LinearOp::Select,
+        read_linear_op(&mut self.r)
+    }
+}
+
+fn read_linear_op<'a>(r: &mut Reader<'a>) -> Option<LinearOp<'a>> {
+    if r.at_eof() {
+        None
+    } else {
+        let b = r.read_u8();
+        Some(match b {
+            0x01 => LinearOp::Block,
+            0x02 => LinearOp::Loop,
+            0x03 => LinearOp::If,
+            0x04 => LinearOp::Else,
+            0x0f => LinearOp::End,
+            x => LinearOp::Normal(match x {
+                0x00 => NormalOp::Nop,
+                0x05 => NormalOp::Select,
                 0x06 => {
-                    let has_arg = self.r.read_var_u1().unwrap();
-                    let relative_depth = self.r.read_var_u32();
-                    LinearOp::Br{
+                    let has_arg = r.read_var_u1().unwrap();
+                    let relative_depth = r.read_var_u32();
+                    NormalOp::Br {
                         has_arg: has_arg,
                         relative_depth: relative_depth
                     }
                 }
                 0x07 => {
-                    let has_arg = self.r.read_var_u1().unwrap();
-                    let relative_depth = self.r.read_var_u32();
-                    LinearOp::BrIf{
+                    let has_arg = r.read_var_u1().unwrap();
+                    let relative_depth = r.read_var_u32();
+                    NormalOp::BrIf {
                         has_arg: has_arg,
                         relative_depth: relative_depth
                     }
                 }
                 0x08 => {
-                    let has_arg = self.r.read_var_u1().unwrap_or(true);
-                    let target_count = self.r.read_var_u32();
-                    let target_data = self.r.read_bytes_with_len((target_count as usize) * 4);
-                    let default = self.r.read_u32();
+                    let has_arg = r.read_var_u1().unwrap_or(true);
+                    let target_count = r.read_var_u32();
+                    let target_data = r.read_bytes_with_len((target_count as usize) * 4);
+                    let default = r.read_u32();
 
-                    LinearOp::BrTable {
+                    NormalOp::BrTable {
                         has_arg: has_arg,
                         target_data: target_data,
                         default: default
                     }
                 }
                 0x09 => {
-                    let has_arg = self.r.read_var_u1().unwrap();
-                    LinearOp::Return{has_arg: has_arg}
+                    let has_arg = r.read_var_u1().unwrap();
+                    NormalOp::Return{has_arg: has_arg}
                 }
-                0x0a => LinearOp::Unreachable,
-                0x0b => LinearOp::Drop,
-                0x0f => LinearOp::End,
-                0x10 => LinearOp::Const(Dynamic::from_i32(self.r.read_var_i32())),
-                0x11 => LinearOp::Const(Dynamic::from_i64(self.r.read_var_i64())),
-                0x12 => LinearOp::Const(Dynamic::Float64(unsafe { mem::transmute(self.r.read_u64()) })),
-                0x13 => LinearOp::Const(Dynamic::Float32(unsafe { mem::transmute(self.r.read_u32()) })),
-                0x14 => LinearOp::GetLocal(self.r.read_var_u32() as usize),
-                0x15 => LinearOp::SetLocal(self.r.read_var_u32() as usize),
-                0x19 => LinearOp::TeeLocal(self.r.read_var_u32() as usize),
+                0x0a => NormalOp::Unreachable,
+                0x0b => NormalOp::Drop,
+                0x10 => NormalOp::Const(Dynamic::from_i32(r.read_var_i32())),
+                0x11 => NormalOp::Const(Dynamic::from_i64(r.read_var_i64())),
+                0x12 => NormalOp::Const(Dynamic::Float64(unsafe { mem::transmute(r.read_u64()) })),
+                0x13 => NormalOp::Const(Dynamic::Float32(unsafe { mem::transmute(r.read_u32()) })),
+                0x14 => NormalOp::GetLocal(r.read_var_u32() as usize),
+                0x15 => NormalOp::SetLocal(r.read_var_u32() as usize),
+                0x19 => NormalOp::TeeLocal(r.read_var_u32() as usize),
                 0x16 => {
-                    let argument_count = self.r.read_var_u32();
-                    let index = self.r.read_var_u32() as usize;
-                    LinearOp::Call{
+                    let argument_count = r.read_var_u32();
+                    let index = r.read_var_u32() as usize;
+                    NormalOp::Call{
                         argument_count: argument_count,
                         index: FunctionIndex(index)
                     }
                 }
                 0x17 => {
-                    let argument_count = self.r.read_var_u32();
-                    let index = self.r.read_var_u32() as usize;
-                    LinearOp::CallIndirect{
+                    let argument_count = r.read_var_u32();
+                    let index = r.read_var_u32() as usize;
+                    NormalOp::CallIndirect{
                         argument_count: argument_count,
                         index: TableIndex(index)
                     }
                 }
                 0x18 => {
-                    let argument_count = self.r.read_var_u32();
-                    let index = self.r.read_var_u32() as usize;
-                    LinearOp::CallImport{
+                    let argument_count = r.read_var_u32();
+                    let index = r.read_var_u32() as usize;
+                    NormalOp::CallImport{
                         argument_count: argument_count,
                         index: ImportIndex(index)
                     }
                 }
-                0x20 => LinearOp::IntLoad(IntType::Int32, Sign::Signed, Size::I8, read_mem_imm(&mut self.r)),
-                0x21 => LinearOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I8, read_mem_imm(&mut self.r)),
-                0x22 => LinearOp::IntLoad(IntType::Int32, Sign::Signed, Size::I16, read_mem_imm(&mut self.r)),
-                0x23 => LinearOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I16, read_mem_imm(&mut self.r)),
-                0x24 => LinearOp::IntLoad(IntType::Int64, Sign::Signed, Size::I8, read_mem_imm(&mut self.r)),
-                0x25 => LinearOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I8, read_mem_imm(&mut self.r)),
-                0x26 => LinearOp::IntLoad(IntType::Int64, Sign::Signed, Size::I16, read_mem_imm(&mut self.r)),
-                0x27 => LinearOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I16, read_mem_imm(&mut self.r)),
-                0x28 => LinearOp::IntLoad(IntType::Int64, Sign::Signed, Size::I32, read_mem_imm(&mut self.r)),
-                0x29 => LinearOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I32, read_mem_imm(&mut self.r)),
-                0x2a => LinearOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I32, read_mem_imm(&mut self.r)),
-                0x2b => LinearOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I64, read_mem_imm(&mut self.r)),
-                0x2c => LinearOp::FloatLoad(FloatType::Float32, read_mem_imm(&mut self.r)),
-                0x2d => LinearOp::FloatLoad(FloatType::Float64, read_mem_imm(&mut self.r)),
-                0x2e => LinearOp::IntStore(IntType::Int32, Size::I8, read_mem_imm(&mut self.r)),
-                0x2f => LinearOp::IntStore(IntType::Int32, Size::I16, read_mem_imm(&mut self.r)),
-                0x30 => LinearOp::IntStore(IntType::Int64, Size::I8, read_mem_imm(&mut self.r)),
-                0x31 => LinearOp::IntStore(IntType::Int64, Size::I16, read_mem_imm(&mut self.r)),
-                0x32 => LinearOp::IntStore(IntType::Int64, Size::I32, read_mem_imm(&mut self.r)),
-                0x33 => LinearOp::IntStore(IntType::Int32, Size::I32, read_mem_imm(&mut self.r)),
-                0x34 => LinearOp::IntStore(IntType::Int64, Size::I64, read_mem_imm(&mut self.r)),
-                0x35 => LinearOp::FloatStore(FloatType::Float32, read_mem_imm(&mut self.r)),
-                0x36 => LinearOp::FloatStore(FloatType::Float64, read_mem_imm(&mut self.r)),
-                0x3b => LinearOp::CurrentMemory,
-                0x39 => LinearOp::GrowMemory,
-                0x40 => LinearOp::IntBin(IntType::Int32, IntBinOp::Add),
-                0x41 => LinearOp::IntBin(IntType::Int32, IntBinOp::Sub),
-                0x42 => LinearOp::IntBin(IntType::Int32, IntBinOp::Mul),
-                0x43 => LinearOp::IntBin(IntType::Int32, IntBinOp::DivS),
-                0x44 => LinearOp::IntBin(IntType::Int32, IntBinOp::DivU),
-                0x45 => LinearOp::IntBin(IntType::Int32, IntBinOp::RemS),
-                0x46 => LinearOp::IntBin(IntType::Int32, IntBinOp::RemU),
-                0x47 => LinearOp::IntBin(IntType::Int32, IntBinOp::And),
-                0x48 => LinearOp::IntBin(IntType::Int32, IntBinOp::Or),
-                0x49 => LinearOp::IntBin(IntType::Int32, IntBinOp::Xor),
-                0x4a => LinearOp::IntBin(IntType::Int32, IntBinOp::Shl),
-                0x4b => LinearOp::IntBin(IntType::Int32, IntBinOp::ShrU),
-                0x4c => LinearOp::IntBin(IntType::Int32, IntBinOp::ShrS),
-                0xb6 => LinearOp::IntBin(IntType::Int32, IntBinOp::Rotr),
-                0xb7 => LinearOp::IntBin(IntType::Int32, IntBinOp::Rotl),
-                0x4d => LinearOp::IntCmp(IntType::Int32, IntCmpOp::Eq),
-                0x4e => LinearOp::IntCmp(IntType::Int32, IntCmpOp::Ne),
-                0x4f => LinearOp::IntCmp(IntType::Int32, IntCmpOp::LtS),
-                0x50 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::LeS),
-                0x51 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::LtU),
-                0x52 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::LeU),
-                0x53 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::GtS),
-                0x54 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::GeS),
-                0x55 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::GtU),
-                0x56 => LinearOp::IntCmp(IntType::Int32, IntCmpOp::GeU),
-                0x57 => LinearOp::IntUn(IntType::Int32, IntUnOp::Clz),
-                0x58 => LinearOp::IntUn(IntType::Int32, IntUnOp::Ctz),
-                0x59 => LinearOp::IntUn(IntType::Int32, IntUnOp::Popcnt),
-                0x5a => LinearOp::IntEqz(IntType::Int32),
-                0x5b => LinearOp::IntBin(IntType::Int64, IntBinOp::Add),
-                0x5c => LinearOp::IntBin(IntType::Int64, IntBinOp::Sub),
-                0x5d => LinearOp::IntBin(IntType::Int64, IntBinOp::Mul),
-                0x5e => LinearOp::IntBin(IntType::Int64, IntBinOp::DivS),
-                0x5f => LinearOp::IntBin(IntType::Int64, IntBinOp::DivU),
-                0x60 => LinearOp::IntBin(IntType::Int64, IntBinOp::RemS),
-                0x61 => LinearOp::IntBin(IntType::Int64, IntBinOp::RemU),
-                0x62 => LinearOp::IntBin(IntType::Int64, IntBinOp::And),
-                0x63 => LinearOp::IntBin(IntType::Int64, IntBinOp::Or),
-                0x64 => LinearOp::IntBin(IntType::Int64, IntBinOp::Xor),
-                0x65 => LinearOp::IntBin(IntType::Int64, IntBinOp::Shl),
-                0x66 => LinearOp::IntBin(IntType::Int64, IntBinOp::ShrU),
-                0x67 => LinearOp::IntBin(IntType::Int64, IntBinOp::ShrS),
-                0xb8 => LinearOp::IntBin(IntType::Int64, IntBinOp::Rotr),
-                0xb9 => LinearOp::IntBin(IntType::Int64, IntBinOp::Rotl),
-                0x68 => LinearOp::IntCmp(IntType::Int64, IntCmpOp::Eq),
-                0x69 => LinearOp::IntCmp(IntType::Int64, IntCmpOp::Ne),
-                0x6a => LinearOp::IntCmp(IntType::Int64, IntCmpOp::LtS),
-                0x6b => LinearOp::IntCmp(IntType::Int64, IntCmpOp::LeS),
-                0x6c => LinearOp::IntCmp(IntType::Int64, IntCmpOp::LtU),
-                0x6d => LinearOp::IntCmp(IntType::Int64, IntCmpOp::LeU),
-                0x6e => LinearOp::IntCmp(IntType::Int64, IntCmpOp::GtS),
-                0x6f => LinearOp::IntCmp(IntType::Int64, IntCmpOp::GeS),
-                0x70 => LinearOp::IntCmp(IntType::Int64, IntCmpOp::GtU),
-                0x71 => LinearOp::IntCmp(IntType::Int64, IntCmpOp::GeU),
-                0x72 => LinearOp::IntUn(IntType::Int64, IntUnOp::Clz),
-                0x73 => LinearOp::IntUn(IntType::Int64, IntUnOp::Ctz),
-                0x74 => LinearOp::IntUn(IntType::Int64, IntUnOp::Popcnt),
-                0xba => LinearOp::IntEqz(IntType::Int64),
-                0x75 => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Add),
-                0x76 => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Sub),
-                0x77 => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Mul),
-                0x78 => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Div),
-                0x79 => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Min),
-                0x7a => LinearOp::FloatBin(FloatType::Float32, FloatBinOp::Max),
-                0x7b => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Abs),
-                0x7c => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Neg),
-                0x7d => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Copysign),
-                0x7e => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Ceil),
-                0x7f => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Floor),
-                0x80 => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Trunc),
-                0x81 => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Nearest),
-                0x82 => LinearOp::FloatUn(FloatType::Float32, FloatUnOp::Sqrt),
-                0x83 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Eq),
-                0x84 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ne),
-                0x85 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Lt),
-                0x86 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Le),
-                0x87 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Gt),
-                0x88 => LinearOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ge),
-                0x89 => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Add),
-                0x8a => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Sub),
-                0x8b => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Mul),
-                0x8c => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Div),
-                0x8d => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Min),
-                0x8e => LinearOp::FloatBin(FloatType::Float64, FloatBinOp::Max),
-                0x8f => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Abs),
-                0x90 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Neg),
-                0x91 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Copysign),
-                0x92 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Ceil),
-                0x93 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Floor),
-                0x94 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Trunc),
-                0x95 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Nearest),
-                0x96 => LinearOp::FloatUn(FloatType::Float64, FloatUnOp::Sqrt),
-                0x97 => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Eq),
-                0x98 => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ne),
-                0x99 => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Lt),
-                0x9a => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Le),
-                0x9b => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Gt),
-                0x9c => LinearOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge),
-                0x9d => LinearOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Signed),
-                0x9e => LinearOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Signed),
-                0x9f => LinearOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Unsigned),
-                0xa0 => LinearOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Unsigned),
-                0xa1 => LinearOp::IntTruncate,
-                0xa2 => LinearOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Signed),
-                0xa3 => LinearOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Signed),
-                0xa4 => LinearOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Unsigned),
-                0xa5 => LinearOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Unsigned),
-                0xa6 => LinearOp::IntExtend(Sign::Signed),
-                0xa7 => LinearOp::IntExtend(Sign::Unsigned),
-                0xa8 => LinearOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float32),
-                0xa9 => LinearOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float32),
-                0xaa => LinearOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float32),
-                0xab => LinearOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float32),
-                0xac => LinearOp::FloatConvert(FloatType::Float32),
-                0xad => LinearOp::Reinterpret(Type::Int32, Type::Float32),
-                0xae => LinearOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float64),
-                0xaf => LinearOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float64),
-                0xb0 => LinearOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float64),
-                0xb1 => LinearOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float64),
-                0xb2 => LinearOp::FloatConvert(FloatType::Float64),
-                0xb3 => LinearOp::Reinterpret(Type::Float64, Type::Int64),
-                0xb4 => LinearOp::Reinterpret(Type::Int32, Type::Float32),
-                0xb5 => LinearOp::Reinterpret(Type::Int64, Type::Float64),
-                x => panic!("unknown op: {:x} at {}/{}", x, self.r.position() - 1, self.r.len())
+                0x20 => NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I8, read_mem_imm(r)),
+                0x21 => NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I8, read_mem_imm(r)),
+                0x22 => NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I16, read_mem_imm(r)),
+                0x23 => NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I16, read_mem_imm(r)),
+                0x24 => NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I8, read_mem_imm(r)),
+                0x25 => NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I8, read_mem_imm(r)),
+                0x26 => NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I16, read_mem_imm(r)),
+                0x27 => NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I16, read_mem_imm(r)),
+                0x28 => NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I32, read_mem_imm(r)),
+                0x29 => NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I32, read_mem_imm(r)),
+                0x2a => NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I32, read_mem_imm(r)),
+                0x2b => NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I64, read_mem_imm(r)),
+                0x2c => NormalOp::FloatLoad(FloatType::Float32, read_mem_imm(r)),
+                0x2d => NormalOp::FloatLoad(FloatType::Float64, read_mem_imm(r)),
+                0x2e => NormalOp::IntStore(IntType::Int32, Size::I8, read_mem_imm(r)),
+                0x2f => NormalOp::IntStore(IntType::Int32, Size::I16, read_mem_imm(r)),
+                0x30 => NormalOp::IntStore(IntType::Int64, Size::I8, read_mem_imm(r)),
+                0x31 => NormalOp::IntStore(IntType::Int64, Size::I16, read_mem_imm(r)),
+                0x32 => NormalOp::IntStore(IntType::Int64, Size::I32, read_mem_imm(r)),
+                0x33 => NormalOp::IntStore(IntType::Int32, Size::I32, read_mem_imm(r)),
+                0x34 => NormalOp::IntStore(IntType::Int64, Size::I64, read_mem_imm(r)),
+                0x35 => NormalOp::FloatStore(FloatType::Float32, read_mem_imm(r)),
+                0x36 => NormalOp::FloatStore(FloatType::Float64, read_mem_imm(r)),
+                0x3b => NormalOp::CurrentMemory,
+                0x39 => NormalOp::GrowMemory,
+                0x40 => NormalOp::IntBin(IntType::Int32, IntBinOp::Add),
+                0x41 => NormalOp::IntBin(IntType::Int32, IntBinOp::Sub),
+                0x42 => NormalOp::IntBin(IntType::Int32, IntBinOp::Mul),
+                0x43 => NormalOp::IntBin(IntType::Int32, IntBinOp::DivS),
+                0x44 => NormalOp::IntBin(IntType::Int32, IntBinOp::DivU),
+                0x45 => NormalOp::IntBin(IntType::Int32, IntBinOp::RemS),
+                0x46 => NormalOp::IntBin(IntType::Int32, IntBinOp::RemU),
+                0x47 => NormalOp::IntBin(IntType::Int32, IntBinOp::And),
+                0x48 => NormalOp::IntBin(IntType::Int32, IntBinOp::Or),
+                0x49 => NormalOp::IntBin(IntType::Int32, IntBinOp::Xor),
+                0x4a => NormalOp::IntBin(IntType::Int32, IntBinOp::Shl),
+                0x4b => NormalOp::IntBin(IntType::Int32, IntBinOp::ShrU),
+                0x4c => NormalOp::IntBin(IntType::Int32, IntBinOp::ShrS),
+                0xb6 => NormalOp::IntBin(IntType::Int32, IntBinOp::Rotr),
+                0xb7 => NormalOp::IntBin(IntType::Int32, IntBinOp::Rotl),
+                0x4d => NormalOp::IntCmp(IntType::Int32, IntCmpOp::Eq),
+                0x4e => NormalOp::IntCmp(IntType::Int32, IntCmpOp::Ne),
+                0x4f => NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtS),
+                0x50 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeS),
+                0x51 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtU),
+                0x52 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeU),
+                0x53 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtS),
+                0x54 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeS),
+                0x55 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtU),
+                0x56 => NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeU),
+                0x57 => NormalOp::IntUn(IntType::Int32, IntUnOp::Clz),
+                0x58 => NormalOp::IntUn(IntType::Int32, IntUnOp::Ctz),
+                0x59 => NormalOp::IntUn(IntType::Int32, IntUnOp::Popcnt),
+                0x5a => NormalOp::IntEqz(IntType::Int32),
+                0x5b => NormalOp::IntBin(IntType::Int64, IntBinOp::Add),
+                0x5c => NormalOp::IntBin(IntType::Int64, IntBinOp::Sub),
+                0x5d => NormalOp::IntBin(IntType::Int64, IntBinOp::Mul),
+                0x5e => NormalOp::IntBin(IntType::Int64, IntBinOp::DivS),
+                0x5f => NormalOp::IntBin(IntType::Int64, IntBinOp::DivU),
+                0x60 => NormalOp::IntBin(IntType::Int64, IntBinOp::RemS),
+                0x61 => NormalOp::IntBin(IntType::Int64, IntBinOp::RemU),
+                0x62 => NormalOp::IntBin(IntType::Int64, IntBinOp::And),
+                0x63 => NormalOp::IntBin(IntType::Int64, IntBinOp::Or),
+                0x64 => NormalOp::IntBin(IntType::Int64, IntBinOp::Xor),
+                0x65 => NormalOp::IntBin(IntType::Int64, IntBinOp::Shl),
+                0x66 => NormalOp::IntBin(IntType::Int64, IntBinOp::ShrU),
+                0x67 => NormalOp::IntBin(IntType::Int64, IntBinOp::ShrS),
+                0xb8 => NormalOp::IntBin(IntType::Int64, IntBinOp::Rotr),
+                0xb9 => NormalOp::IntBin(IntType::Int64, IntBinOp::Rotl),
+                0x68 => NormalOp::IntCmp(IntType::Int64, IntCmpOp::Eq),
+                0x69 => NormalOp::IntCmp(IntType::Int64, IntCmpOp::Ne),
+                0x6a => NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtS),
+                0x6b => NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeS),
+                0x6c => NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtU),
+                0x6d => NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeU),
+                0x6e => NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtS),
+                0x6f => NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeS),
+                0x70 => NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtU),
+                0x71 => NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeU),
+                0x72 => NormalOp::IntUn(IntType::Int64, IntUnOp::Clz),
+                0x73 => NormalOp::IntUn(IntType::Int64, IntUnOp::Ctz),
+                0x74 => NormalOp::IntUn(IntType::Int64, IntUnOp::Popcnt),
+                0xba => NormalOp::IntEqz(IntType::Int64),
+                0x75 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Add),
+                0x76 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Sub),
+                0x77 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Mul),
+                0x78 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Div),
+                0x79 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Min),
+                0x7a => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Max),
+                0x7b => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Abs),
+                0x7c => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Neg),
+                0x7d => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Copysign),
+                0x7e => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Ceil),
+                0x7f => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Floor),
+                0x80 => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Trunc),
+                0x81 => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Nearest),
+                0x82 => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Sqrt),
+                0x83 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Eq),
+                0x84 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ne),
+                0x85 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Lt),
+                0x86 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Le),
+                0x87 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Gt),
+                0x88 => NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ge),
+                0x89 => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Add),
+                0x8a => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Sub),
+                0x8b => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Mul),
+                0x8c => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Div),
+                0x8d => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Min),
+                0x8e => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Max),
+                0x8f => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Abs),
+                0x90 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Neg),
+                0x91 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Copysign),
+                0x92 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Ceil),
+                0x93 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Floor),
+                0x94 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Trunc),
+                0x95 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Nearest),
+                0x96 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Sqrt),
+                0x97 => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Eq),
+                0x98 => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ne),
+                0x99 => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Lt),
+                0x9a => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Le),
+                0x9b => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Gt),
+                0x9c => NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge),
+                0x9d => NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Signed),
+                0x9e => NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Signed),
+                0x9f => NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Unsigned),
+                0xa0 => NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Unsigned),
+                0xa1 => NormalOp::IntTruncate,
+                0xa2 => NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Signed),
+                0xa3 => NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Signed),
+                0xa4 => NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Unsigned),
+                0xa5 => NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Unsigned),
+                0xa6 => NormalOp::IntExtend(Sign::Signed),
+                0xa7 => NormalOp::IntExtend(Sign::Unsigned),
+                0xa8 => NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float32),
+                0xa9 => NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float32),
+                0xaa => NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float32),
+                0xab => NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float32),
+                0xac => NormalOp::FloatConvert(FloatType::Float32),
+                0xad => NormalOp::Reinterpret(Type::Int32, Type::Float32),
+                0xae => NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float64),
+                0xaf => NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float64),
+                0xb0 => NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float64),
+                0xb1 => NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float64),
+                0xb2 => NormalOp::FloatConvert(FloatType::Float64),
+                0xb3 => NormalOp::Reinterpret(Type::Float64, Type::Int64),
+                0xb4 => NormalOp::Reinterpret(Type::Int32, Type::Float32),
+                0xb5 => NormalOp::Reinterpret(Type::Int64, Type::Float64),
+                x => panic!("unknown op: {:x} at {}/{}", x, r.position() - 1, r.len())
             })
+        })
+    }
+}
+
+enum BlockStackEl<'a> {
+    Block(Vec<BlockOp<'a>>),
+    Loop(Vec<BlockOp<'a>>),
+    If(bool, Vec<BlockOp<'a>>, Vec<BlockOp<'a>>),
+}
+
+fn push_block<'a>(op: BlockOp<'a>, blocks: &mut Vec<BlockStackEl<'a>>) -> Option<BlockOp<'a>> {
+    match blocks.last_mut() {
+        Some(b) => {
+            match b {
+                &mut BlockStackEl::Block(ref mut ops) => ops.push(op),
+                &mut BlockStackEl::Loop(ref mut ops) => ops.push(op),
+                &mut BlockStackEl::If(in_cond, ref mut then, ref mut otherwise) =>
+                    if in_cond { then } else { otherwise }.push(op),
+            }
+            None
+        }
+        None => Some(op),
+    }
+}
+
+impl<'a> BlockOp<'a> {
+    pub fn parse(r: &mut Reader<'a>) -> BlockOp<'a> {
+        let mut blocks = Vec::new();
+
+        while let Some(l) = read_linear_op(r) {
+            match l {
+                LinearOp::Block => blocks.push(BlockStackEl::Block(Vec::new())),
+                LinearOp::Loop => blocks.push(BlockStackEl::Loop(Vec::new())),
+                LinearOp::If => blocks.push(BlockStackEl::If(true, Vec::new(), Vec::new())),
+                LinearOp::Else => {
+                    match blocks.last_mut().unwrap() {
+                        &mut BlockStackEl::If(ref mut in_cond, _, _) => {
+                            assert!(*in_cond);
+                            *in_cond = false;
+                        }
+                        _ => panic!()
+                    }
+                }
+                LinearOp::End => {
+                    let b = match blocks.pop().unwrap() {
+                        BlockStackEl::Block(ops) => BlockOp::Block(Block::Block(ops)),
+                        BlockStackEl::Loop(ops) => BlockOp::Block(Block::Loop(ops)),
+                        BlockStackEl::If(_, then, otherwise) => BlockOp::Block(Block::If(then, otherwise)),
+                    };
+                    match push_block(b, &mut blocks) {
+                        None => {}
+                        Some(val) => return val,
+                    }
+                }
+                LinearOp::Normal(x) => match push_block(BlockOp::Normal(x), &mut blocks) {
+                    None => {}
+                    Some(val) => return val,
+                },
+            }
+        }
+
+        panic!();
+    }
+}
+
+pub struct BlockOpReader<'a> {
+    r: Reader<'a>
+}
+
+impl<'a> BlockOpReader<'a> {
+    pub fn new(data: &'a [u8]) -> BlockOpReader<'a> {
+        BlockOpReader {
+            r: Reader::new(data)
+        }
+    }
+}
+
+impl<'a> Iterator for BlockOpReader<'a> {
+    type Item = BlockOp<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.r.at_eof() {
+            None
+        } else {
+            Some(BlockOp::parse(&mut self.r))
         }
     }
 }

@@ -9,7 +9,7 @@ use std::num::Wrapping;
 
 use types::{Type, Pr};
 use reader::Reader;
-use ops::LinearOpReader;
+use ops::{LinearOpReader, BlockOpReader};
 
 struct Chunk<'a> {
     name: &'a str,
@@ -75,6 +75,9 @@ pub struct FunctionBody<'a> {
 impl<'a> FunctionBody<'a> {
     pub fn linear_ops(&self) -> LinearOpReader {
         LinearOpReader::new(self.ast)
+    }
+    pub fn block_ops(&self) -> BlockOpReader {
+        BlockOpReader::new(self.ast)
     }
 }
 

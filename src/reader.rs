@@ -6,7 +6,7 @@ pub struct Reader<'a> {
 }
 
 #[derive(Debug)]
-enum ReadError {
+pub enum ReadError {
     BadVarInt1(u32)
 }
 
