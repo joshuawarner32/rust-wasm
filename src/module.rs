@@ -104,6 +104,31 @@ pub struct Module<'a> {
     pub names: Vec<Names<'a>>
 }
 
+pub struct ModuleBuilder {
+    // types: Vec<FunctionType>,
+    // pub imports: Vec<Import>,
+    // pub functions: Vec<FunctionType>,
+    // pub table: Vec<FunctionIndex>,
+    pub memory_info: MemoryInfo,
+    // pub start_function_index: Option<FunctionIndex>,
+    // pub exports: Vec<Export>,
+    // pub code: Vec<FunctionBody>,
+    // pub memory_chunks: Vec<MemoryChunk>,
+    // pub names: Vec<Names>
+}
+
+impl ModuleBuilder {
+    pub fn new() -> ModuleBuilder {
+        ModuleBuilder {
+            memory_info: MemoryInfo {
+                initial_64k_pages: 1,
+                maximum_64k_pages: 1,
+                is_exported: true
+            },
+        }
+    }
+}
+
 fn as_type_slice(bytes: &[u8]) -> &[Type] {
     for b in bytes {
         if *b > 4 || *b == 0 {
