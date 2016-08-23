@@ -360,9 +360,9 @@ impl<'a> fmt::Display for NormalOp<'a> {
         match self {
             &NormalOp::Nop => write!(f, "nop"),
             &NormalOp::Select => write!(f, "select"),
-            &NormalOp::Br{has_arg: _, relative_depth: _} => write!(f, "br"),
-            &NormalOp::BrIf{has_arg: _, relative_depth: _} => write!(f, "br_if"),
-            &NormalOp::BrTable{has_arg: _, target_data: _, default: _} => write!(f, "br_table"),
+            &NormalOp::Br{has_arg, relative_depth} => write!(f, "br {}{}", if has_arg { "arg " } else { "" }, relative_depth),
+            &NormalOp::BrIf{has_arg, relative_depth} => write!(f, "br_if {}{}", if has_arg { "arg " } else { "" }, relative_depth),
+            &NormalOp::BrTable{has_arg, target_data, default} => write!(f, "br_table {}", if has_arg { "arg " } else { "" }),
             &NormalOp::Return{has_arg} => write!(f, "return {}", if has_arg { "arg" } else { "" }),
             &NormalOp::Unreachable => write!(f, "unreachable"),
             &NormalOp::Drop => write!(f, "drop"),
@@ -379,11 +379,42 @@ impl<'a> fmt::Display for NormalOp<'a> {
             &NormalOp::IntStore(IntType, Size, MemImm) => write!(f, "IntStore"),
             &NormalOp::FloatStore(FloatType, MemImm) => write!(f, "FloatStore"),
 
-            &NormalOp::CurrentMemory => write!(f, "CurrentMemory"),
-            &NormalOp::GrowMemory => write!(f, "GrowMemory"),
+            &NormalOp::CurrentMemory => write!(f, "current_memory"),
+            &NormalOp::GrowMemory => write!(f, "grow_memory"),
 
-            &NormalOp::IntBin(IntType, IntBinOp) => write!(f, "IntBin"),
-            &NormalOp::IntCmp(IntType, IntCmpOp) => write!(f, "IntCmp"),
+            &NormalOp::IntBin(ty, op) => {
+                match op {
+                    IntBinOp::Add => write!(f, "{}.add", ty),
+                    IntBinOp::Sub => write!(f, "{}.sub", ty),
+                    IntBinOp::Mul => write!(f, "{}.mul", ty),
+                    IntBinOp::DivS => write!(f, "{}.divs", ty),
+                    IntBinOp::DivU => write!(f, "{}.divu", ty),
+                    IntBinOp::RemS => write!(f, "{}.rems", ty),
+                    IntBinOp::RemU => write!(f, "{}.remu", ty),
+                    IntBinOp::And => write!(f, "{}.and", ty),
+                    IntBinOp::Or => write!(f, "{}.or", ty),
+                    IntBinOp::Xor => write!(f, "{}.xor", ty),
+                    IntBinOp::Shl => write!(f, "{}.shl", ty),
+                    IntBinOp::ShrU => write!(f, "{}.shru", ty),
+                    IntBinOp::ShrS => write!(f, "{}.shrs", ty),
+                    IntBinOp::Rotr => write!(f, "{}.rotr", ty),
+                    IntBinOp::Rotl => write!(f, "{}.rotl", ty),
+                }
+            }
+            &NormalOp::IntCmp(ty, op) => {
+                match op {
+                    IntCmpOp::Eq => write!(f, "{}.eq", ty),
+                    IntCmpOp::Ne => write!(f, "{}.ne", ty),
+                    IntCmpOp::LtS => write!(f, "{}.lts", ty),
+                    IntCmpOp::LeS => write!(f, "{}.les", ty),
+                    IntCmpOp::LtU => write!(f, "{}.ltu", ty),
+                    IntCmpOp::LeU => write!(f, "{}.leu", ty),
+                    IntCmpOp::GtS => write!(f, "{}.gts", ty),
+                    IntCmpOp::GeS => write!(f, "{}.ges", ty),
+                    IntCmpOp::GtU => write!(f, "{}.gtu", ty),
+                    IntCmpOp::GeU => write!(f, "{}.geu", ty),
+                }
+            }
             &NormalOp::IntUn(IntType, IntUnOp) => write!(f, "IntUn"),
             &NormalOp::IntEqz(IntType) => write!(f, "IntEqz"),
             &NormalOp::FloatBin(FloatType, FloatBinOp) => write!(f, "FloatBin"),

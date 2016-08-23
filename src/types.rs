@@ -45,6 +45,12 @@ impl IntType {
     }
 }
 
+impl fmt::Display for IntType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.to_type())
+    }
+}
+
 #[derive(Copy, Clone)]
 pub enum FloatType {
     Float32,
@@ -57,6 +63,11 @@ impl FloatType {
             FloatType::Float32 => Type::Float32,
             FloatType::Float64 => Type::Float64,
         }
+    }
+}
+impl fmt::Display for FloatType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.to_type())
     }
 }
 
