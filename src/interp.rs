@@ -204,8 +204,8 @@ impl<'a> Instance<'a> {
                         match run_block(context, ops) {
                             val@ Res::Return(_) => return val,
                             val@ Res::Value(_) => return val,
-                            Res::Branch(0, val) => return Res::Value(val),
-                            Res::Branch(1, _) => continue,
+                            Res::Branch(0, _) => continue,
+                            Res::Branch(1, val) => return Res::Value(val),
                             Res::Branch(x, val) => return Res::Branch(x - 2, val),
                         }
                     }
