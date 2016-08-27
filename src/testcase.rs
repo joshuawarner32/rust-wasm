@@ -148,17 +148,13 @@ fn parse_const(s: &Sexpr) -> Dynamic {
     sexpr_match!(s;
         (ident:&ty &value) => {
             return match ty.as_str() {
-                "i32.const" => {
-                    Dynamic::from_i32(parse_int(value) as i32)
-                }
-                "i64.const" => {
-                    Dynamic::from_i64(parse_int(value) as i64)
-                }
-                // &Sexpr::Identifier("i32.const") => {
-                //     Dynamic::from_i32(parse_int(it[1]))
+                "i32.const" => parse_int(value, IntType::Int32),
+                "i64.const" => parse_int(value, IntType::Int64),
+                // &Sexpr::Identifier("f32.const") => {
+                //     Dynamic::from_f32(parse_int(it[1]))
                 // }
-                // &Sexpr::Identifier("i32.const") => {
-                //     Dynamic::from_i32(parse_int(it[1]))
+                // &Sexpr::Identifier("f64.const") => {
+                //     Dynamic::from_f64(parse_int(it[1]))
                 // }
                 _ => panic!()
             };
@@ -533,35 +529,122 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                     assert_eq!(parse_ops(args, ops, local_names), 1);
                     ops.push(NormalOp::IntEqz(IntType::Int32));
                 }
-                "i64.add" => { ops.push(NormalOp::Nop); }
-                "i64.sub" => { ops.push(NormalOp::Nop); }
-                "i64.mul" => { ops.push(NormalOp::Nop); }
-                "i64.divs" => { ops.push(NormalOp::Nop); }
-                "i64.divu" => { ops.push(NormalOp::Nop); }
-                "i64.rems" => { ops.push(NormalOp::Nop); }
-                "i64.remu" => { ops.push(NormalOp::Nop); }
-                "i64.and" => { ops.push(NormalOp::Nop); }
-                "i64.or" => { ops.push(NormalOp::Nop); }
-                "i64.xor" => { ops.push(NormalOp::Nop); }
-                "i64.shl" => { ops.push(NormalOp::Nop); }
-                "i64.shru" => { ops.push(NormalOp::Nop); }
-                "i64.shrs" => { ops.push(NormalOp::Nop); }
-                "i64.rotr" => { ops.push(NormalOp::Nop); }
-                "i64.rotl" => { ops.push(NormalOp::Nop); }
-                "i64.eq" => { ops.push(NormalOp::Nop); }
-                "i64.ne" => { ops.push(NormalOp::Nop); }
-                "i64.lts" => { ops.push(NormalOp::Nop); }
-                "i64.les" => { ops.push(NormalOp::Nop); }
-                "i64.ltu" => { ops.push(NormalOp::Nop); }
-                "i64.leu" => { ops.push(NormalOp::Nop); }
-                "i64.gts" => { ops.push(NormalOp::Nop); }
-                "i64.ges" => { ops.push(NormalOp::Nop); }
-                "i64.gtu" => { ops.push(NormalOp::Nop); }
-                "i64.geu" => { ops.push(NormalOp::Nop); }
-                "i64.clz" => { ops.push(NormalOp::Nop); }
-                "i64.ctz" => { ops.push(NormalOp::Nop); }
-                "i64.popcnt" => { ops.push(NormalOp::Nop); }
-                "i64.eqz" => { ops.push(NormalOp::Nop); }
+                "i64.add" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Add));
+                }
+                "i64.sub" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Sub));
+                }
+                "i64.mul" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Mul));
+                }
+                "i64.div_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::DivS));
+                }
+                "i64.div_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::DivU));
+                }
+                "i64.rem_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::RemS));
+                }
+                "i64.rem_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::RemU));
+                }
+                "i64.and" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::And));
+                }
+                "i64.or" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Or));
+                }
+                "i64.xor" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Xor));
+                }
+                "i64.shl" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Shl));
+                }
+                "i64.shr_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::ShrU));
+                }
+                "i64.shr_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::ShrS));
+                }
+                "i64.rotr" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Rotr));
+                }
+                "i64.rotl" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Rotl));
+                }
+                "i64.eq" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::Eq));
+                }
+                "i64.ne" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::Ne));
+                }
+                "i64.lt_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtS));
+                }
+                "i64.le_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeS));
+                }
+                "i64.lt_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtU));
+                }
+                "i64.le_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeU));
+                }
+                "i64.gt_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtS));
+                }
+                "i64.ge_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeS));
+                }
+                "i64.gt_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtU));
+                }
+                "i64.ge_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeU));
+                }
+                "i64.clz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Clz));
+                }
+                "i64.ctz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Ctz));
+                }
+                "i64.popcnt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Popcnt));
+                }
+                "i64.eqz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntEqz(IntType::Int64));
+                }
                 "f32.add" => { ops.push(NormalOp::Nop); }
                 "f32.sub" => { ops.push(NormalOp::Nop); }
                 "f32.mul" => { ops.push(NormalOp::Nop); }
@@ -634,13 +717,28 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
     );
 }
 
-fn parse_int(node: &Sexpr) -> i64 {
+fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
-            if text.starts_with("0x") {
-                i64::from_str_radix(&text[2..], 16).unwrap()
-            } else {
-                str::parse(text).unwrap()
+            match ty {
+                IntType::Int32 => {
+                    if text.starts_with("-") {
+                        Dynamic::from_i32(i32::from_str_radix(text, 10).unwrap())
+                    } else if text.starts_with("0x") {
+                        Dynamic::from_u32(u32::from_str_radix(&text[2..], 16).unwrap())
+                    } else {
+                        Dynamic::from_u32(u32::from_str_radix(text, 10).unwrap())
+                    }
+                }
+                IntType::Int64 => {
+                    if text.starts_with("-") {
+                        Dynamic::from_i64(i64::from_str_radix(text, 10).unwrap())
+                    } else if text.starts_with("0x") {
+                        Dynamic::from_u64(u64::from_str_radix(&text[2..], 16).unwrap())
+                    } else {
+                        Dynamic::from_u64(u64::from_str_radix(text, 10).unwrap())
+                    }
+                }
             }
         }
         _ => panic!("expected number id: {}", node)

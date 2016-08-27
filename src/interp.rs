@@ -610,7 +610,10 @@ fn interp_int_un(ty: IntType, op: IntUnOp, a: Dynamic) -> Dynamic {
         },
     };
 
-    Dynamic::from_u32(res)
+    match ty {
+        IntType::Int32 => Dynamic::from_u32(res),
+        IntType::Int64 => Dynamic::from_u64(res as u64),
+    }
 }
 
 fn interp_int_eqz(ty: IntType, a: Dynamic) -> Dynamic {
