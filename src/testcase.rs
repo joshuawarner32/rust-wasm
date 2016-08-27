@@ -2,9 +2,10 @@ use std::str;
 use std::collections::HashMap;
 
 use sexpr::Sexpr;
-use module::{Module, ModuleBuilder, MemoryInfo};
-use types::Type;
+use module::{AsBytes, Module, MemoryInfo, FunctionBuilder};
+use types::{Type, Dynamic};
 use ops::NormalOp;
+use interp::Instance;
 
 macro_rules! vec_form {
     ($val:expr => () => $code:expr) => {{
@@ -21,6 +22,17 @@ macro_rules! vec_form {
     ($val:expr => (ident:&$ident:ident $($parts:tt)*) => $code:expr) => {{
         if $val.len() > 0 {
             if let &Sexpr::Identifier(ref $ident) = &$val[0] {
+                vec_form!($val[1..] => ($($parts)*) => $code)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }};
+    ($val:expr => (str:&$ident:ident $($parts:tt)*) => $code:expr) => {{
+        if $val.len() > 0 {
+            if let &Sexpr::String(ref $ident) = &$val[0] {
                 vec_form!($val[1..] => ($($parts)*) => $code)
             } else {
                 None
@@ -73,8 +85,39 @@ macro_rules! sexpr_match {
     }};
 }
 
-pub struct TestCase {
+pub struct Invoke {
+    function_name: String,
+    arguments: Vec<Dynamic>,
+}
 
+impl Invoke {
+    fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) -> Option<Dynamic> {
+        let func = instance.module.find(self.function_name.as_bytes()).unwrap();
+        instance.invoke(func, &self.arguments)
+    }
+}
+
+pub enum Assert {
+    Return(Invoke, Dynamic),
+    Trap(Invoke)
+}
+
+impl Assert {
+    fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) {
+        match self {
+            &Assert::Return(ref invoke, result) => {
+                assert_eq!(invoke.run(instance), Some(result));
+            }
+            &Assert::Trap(ref invoke) => {
+                panic!();
+            }
+        }
+    }
+}
+
+pub struct TestCase {
+    module: Module<Vec<u8>>,
+    asserts: Vec<Assert>
 }
 
 fn parse_type(text: &str) -> Type {
@@ -87,18 +130,58 @@ fn parse_type(text: &str) -> Type {
     }
 }
 
+fn parse_invoke(s: &Sexpr) -> Invoke {
+    sexpr_match!(s;
+        (invoke str:&name *args) => {
+            let args = args.iter().map(parse_const).collect::<Vec<_>>();
+            return Invoke {
+                function_name: name.clone(),
+                arguments: args
+            };
+        };
+        _ => panic!()
+    );
+    panic!();
+}
+
+fn parse_const(s: &Sexpr) -> Dynamic {
+    sexpr_match!(s;
+        (ident:&ty &value) => {
+            return match ty.as_str() {
+                "i32.const" => {
+                    Dynamic::from_i32(parse_int(value) as i32)
+                }
+                "i64.const" => {
+                    Dynamic::from_i64(parse_int(value) as i64)
+                }
+                // &Sexpr::Identifier("i32.const") => {
+                //     Dynamic::from_i32(parse_int(it[1]))
+                // }
+                // &Sexpr::Identifier("i32.const") => {
+                //     Dynamic::from_i32(parse_int(it[1]))
+                // }
+                _ => panic!()
+            };
+        };
+        _ => panic!()
+    );
+    panic!();
+}
+
 impl TestCase {
     pub fn parse(bytes: &[u8]) -> TestCase {
         let text = str::from_utf8(bytes).unwrap();
         let exprs = Sexpr::parse(text);
 
+        let mut asserts = Vec::new();
+        let mut module = None;
+
         for s in &exprs {
             sexpr_match!(s;
                 (module *it) => {
-                    let mut m = ModuleBuilder::new();
+                    let mut m = Module::<Vec<u8>>::new();
 
                     let mut function_names = HashMap::new();
-                    let mut functions = Vec::new();
 
                     for s in it {
                         sexpr_match!(s;
@@ -111,61 +194,55 @@ impl TestCase {
                                     None
                                 };
 
-                                let mut param_types = Vec::new();
+                                let mut func = FunctionBuilder::new();
 
                                 let mut param_names = HashMap::new();
-
-                                let mut result_type = None;
-
-                                let mut local_types = Vec::new();
                                 let mut local_names = HashMap::new();
-
-                                let mut ops = Vec::new();
 
                                 while let Some(s) = it.next() {
                                     sexpr_match!(s;
                                         (param &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                param_names.insert(v, param_types.len());
+                                                param_names.insert(v, func.ty.param_types.len());
                                             } else {
                                                 panic!();
                                             }
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                param_types.push(parse_type(v.as_str()));
+                                                func.ty.param_types.push(parse_type(v.as_str()).to_u8());
                                             } else {
                                                 panic!();
                                             }
                                         };
                                         (result &ty) => {
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                result_type = Some(parse_type(v.as_str()));
+                                                func.ty.return_type = Some(parse_type(v.as_str()));
                                             } else {
                                                 panic!();
                                             }
                                         };
                                         (local &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                local_names.insert(v, local_types.len());
+                                                local_names.insert(v, func.local_types.len());
                                             } else {
                                                 panic!();
                                             }
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                local_types.push(parse_type(v.as_str()));
+                                                func.local_types.push(parse_type(v.as_str()));
                                             } else {
                                                 panic!();
                                             }
                                         };
                                         _ => {
-                                            ops.push(parse_op(s));
+                                            parse_op(s, &mut func.ops);
                                         }
                                     );
                                 }
 
                                 if let Some(name) = name {
-                                    function_names.insert(name, functions.len());
+                                    function_names.insert(name, m.functions.len());
                                 }
 
-                                functions.push(0);
+                                m.code.push(func.build());
                             };
                             (export &name &id) => {
                                 // println!("found export!");
@@ -211,24 +288,22 @@ impl TestCase {
                             }
                         );
                     }
+                    module = Some(m)
                 };
                 (assert_invalid &module &text) => {
-                    // println!("found assert_invalid");
+                    panic!();
                 };
-                (assert_return &module) => {
-                    // println!("found assert_return (no text)");
+                (assert_return &invoke &result) => {
+                    asserts.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
                 };
-                (assert_return &module &text) => {
-                    // println!("found assert_return (text)");
+                (assert_return_nan &invoke) => {
+                    panic!();
                 };
-                (assert_return_nan &module) => {
-                    // println!("found assert_return_nan");
-                };
-                (assert_trap &module &text) => {
-                    // println!("found assert_trap");
+                (assert_trap &invoke &text) => {
+                    asserts.push(Assert::Trap(parse_invoke(invoke)));
                 };
                 (invoke &ident *args) => {
-                    // println!("found invoke");
+                    panic!();
                 };
                 _ => {
                     panic!("unhandled: {}", s);
@@ -237,201 +312,222 @@ impl TestCase {
         }
 
         TestCase {
+            module: module.unwrap(),
+            asserts: asserts
         }
     }
 
     pub fn run_all(&self) {
-
+        let mut instance = Instance::new(&self.module);
+        for assert in &self.asserts {
+            assert.run(&mut instance);
+        }
     }
 }
 
-fn parse_op(s: &Sexpr) -> NormalOp {
+fn parse_ops(exprs: &[Sexpr], ops: &mut Vec<NormalOp>) -> usize {
+    let mut num = 0;
+    for s in exprs {
+        parse_op(s, ops);
+        num += 1;
+    }
+    num
+}
+
+fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>) {
     sexpr_match!(s;
         (ident:&op *args) => {
-            return match op.as_str() {
-                "nop" => NormalOp::Nop,
-                "block" => NormalOp::Nop,
-                "loop" => NormalOp::Nop,
-                "if" => NormalOp::Nop,
-                "else" => NormalOp::Nop,
-                "select" => NormalOp::Nop,
-                "br" => NormalOp::Nop,
-                "brif" => NormalOp::Nop,
-                "brtable" => NormalOp::Nop,
-                "return" => NormalOp::Nop,
-                "unreachable" => NormalOp::Nop,
-                "drop" => NormalOp::Nop,
-                "end" => NormalOp::Nop,
-                "i32.const" => NormalOp::Nop,
-                "i64.const" => NormalOp::Nop,
-                "f64.const" => NormalOp::Nop,
-                "f32.const" => NormalOp::Nop,
-                "get_local" => NormalOp::Nop,
-                "set_local" => NormalOp::Nop,
-                "tee_local" => NormalOp::Nop,
-                "call" => NormalOp::Nop,
-                "callindirect" => NormalOp::Nop,
-                "callimport" => NormalOp::Nop,
-                "i32.load8s" => NormalOp::Nop,
-                "i32.load8u" => NormalOp::Nop,
-                "i32.load16s" => NormalOp::Nop,
-                "i32.load16u" => NormalOp::Nop,
-                "i64.load8s" => NormalOp::Nop,
-                "i64.load8u" => NormalOp::Nop,
-                "i64.load16s" => NormalOp::Nop,
-                "i64.load16u" => NormalOp::Nop,
-                "i64.load32s" => NormalOp::Nop,
-                "i64.load32u" => NormalOp::Nop,
-                "i32.load" => NormalOp::Nop,
-                "i64.load" => NormalOp::Nop,
-                "f32.load" => NormalOp::Nop,
-                "f64.load" => NormalOp::Nop,
-                "i32.store8" => NormalOp::Nop,
-                "i32.store16" => NormalOp::Nop,
-                "i64.store8" => NormalOp::Nop,
-                "i64.store16" => NormalOp::Nop,
-                "i64.store32" => NormalOp::Nop,
-                "i32.store" => NormalOp::Nop,
-                "i64.store" => NormalOp::Nop,
-                "f32.store" => NormalOp::Nop,
-                "f64.store" => NormalOp::Nop,
-                "current_memory" => NormalOp::Nop,
-                "grow_memory" => NormalOp::Nop,
-                "i32.add" => NormalOp::Nop,
-                "i32.sub" => NormalOp::Nop,
-                "i32.mul" => NormalOp::Nop,
-                "i32.div_s" => NormalOp::Nop,
-                "i32.div_u" => NormalOp::Nop,
-                "i32.rem_s" => NormalOp::Nop,
-                "i32.rem_u" => NormalOp::Nop,
-                "i32.and" => NormalOp::Nop,
-                "i32.or" => NormalOp::Nop,
-                "i32.xor" => NormalOp::Nop,
-                "i32.shl" => NormalOp::Nop,
-                "i32.shr_u" => NormalOp::Nop,
-                "i32.shr_s" => NormalOp::Nop,
-                "i32.rotr" => NormalOp::Nop,
-                "i32.rotl" => NormalOp::Nop,
-                "i32.eq" => NormalOp::Nop,
-                "i32.ne" => NormalOp::Nop,
-                "i32.lt_s" => NormalOp::Nop,
-                "i32.le_s" => NormalOp::Nop,
-                "i32.lt_u" => NormalOp::Nop,
-                "i32.le_u" => NormalOp::Nop,
-                "i32.gt_s" => NormalOp::Nop,
-                "i32.ge_s" => NormalOp::Nop,
-                "i32.gt_u" => NormalOp::Nop,
-                "i32.ge_u" => NormalOp::Nop,
-                "i32.clz" => NormalOp::Nop,
-                "i32.ctz" => NormalOp::Nop,
-                "i32.popcnt" => NormalOp::Nop,
-                "i32.eqz" => NormalOp::Nop,
-                "i64.add" => NormalOp::Nop,
-                "i64.sub" => NormalOp::Nop,
-                "i64.mul" => NormalOp::Nop,
-                "i64.divs" => NormalOp::Nop,
-                "i64.divu" => NormalOp::Nop,
-                "i64.rems" => NormalOp::Nop,
-                "i64.remu" => NormalOp::Nop,
-                "i64.and" => NormalOp::Nop,
-                "i64.or" => NormalOp::Nop,
-                "i64.xor" => NormalOp::Nop,
-                "i64.shl" => NormalOp::Nop,
-                "i64.shru" => NormalOp::Nop,
-                "i64.shrs" => NormalOp::Nop,
-                "i64.rotr" => NormalOp::Nop,
-                "i64.rotl" => NormalOp::Nop,
-                "i64.eq" => NormalOp::Nop,
-                "i64.ne" => NormalOp::Nop,
-                "i64.lts" => NormalOp::Nop,
-                "i64.les" => NormalOp::Nop,
-                "i64.ltu" => NormalOp::Nop,
-                "i64.leu" => NormalOp::Nop,
-                "i64.gts" => NormalOp::Nop,
-                "i64.ges" => NormalOp::Nop,
-                "i64.gtu" => NormalOp::Nop,
-                "i64.geu" => NormalOp::Nop,
-                "i64.clz" => NormalOp::Nop,
-                "i64.ctz" => NormalOp::Nop,
-                "i64.popcnt" => NormalOp::Nop,
-                "i64.eqz" => NormalOp::Nop,
-                "f32.add" => NormalOp::Nop,
-                "f32.sub" => NormalOp::Nop,
-                "f32.mul" => NormalOp::Nop,
-                "f32.div" => NormalOp::Nop,
-                "f32.min" => NormalOp::Nop,
-                "f32.max" => NormalOp::Nop,
-                "f32.abs" => NormalOp::Nop,
-                "f32.neg" => NormalOp::Nop,
-                "f32.copysign" => NormalOp::Nop,
-                "f32.ceil" => NormalOp::Nop,
-                "f32.floor" => NormalOp::Nop,
-                "f32.trunc" => NormalOp::Nop,
-                "f32.nearest" => NormalOp::Nop,
-                "f32.sqrt" => NormalOp::Nop,
-                "f32.eq" => NormalOp::Nop,
-                "f32.ne" => NormalOp::Nop,
-                "f32.lt" => NormalOp::Nop,
-                "f32.le" => NormalOp::Nop,
-                "f32.gt" => NormalOp::Nop,
-                "f32.ge" => NormalOp::Nop,
-                "f64.add" => NormalOp::Nop,
-                "f64.sub" => NormalOp::Nop,
-                "f64.mul" => NormalOp::Nop,
-                "f64.div" => NormalOp::Nop,
-                "f64.min" => NormalOp::Nop,
-                "f64.max" => NormalOp::Nop,
-                "f64.abs" => NormalOp::Nop,
-                "f64.neg" => NormalOp::Nop,
-                "f64.copysign" => NormalOp::Nop,
-                "f64.ceil" => NormalOp::Nop,
-                "f64.floor" => NormalOp::Nop,
-                "f64.trunc" => NormalOp::Nop,
-                "f64.nearest" => NormalOp::Nop,
-                "f64.sqrt" => NormalOp::Nop,
-                "f64.eq" => NormalOp::Nop,
-                "f64.ne" => NormalOp::Nop,
-                "f64.lt" => NormalOp::Nop,
-                "f64.le" => NormalOp::Nop,
-                "f64.gt" => NormalOp::Nop,
-                "f64.ge" => NormalOp::Nop,
-                "i32.trunc_s/f32" => NormalOp::Nop,
-                "i32.trunc_s/f64" => NormalOp::Nop,
-                "i32.trunc_u/f32" => NormalOp::Nop,
-                "i32.trunc_u/f64" => NormalOp::Nop,
-                "i32.wrap/i64" => NormalOp::Nop,
-                "i64.trunc_s/f32" => NormalOp::Nop,
-                "i64.trunc_s/f64" => NormalOp::Nop,
-                "i64.trunc_u/f32" => NormalOp::Nop,
-                "i64.trunc_u/f64" => NormalOp::Nop,
-                "i64.extend_s/i32" => NormalOp::Nop,
-                "i64.extend_u/i32" => NormalOp::Nop,
-                "f32.convert_s/i32" => NormalOp::Nop,
-                "f32.convert_u/i32" => NormalOp::Nop,
-                "f32.convert_s/i64" => NormalOp::Nop,
-                "f32.convert_u/i64" => NormalOp::Nop,
-                "f32.demote/f64" => NormalOp::Nop,
-                "f32.reinterpret/i32" => NormalOp::Nop,
-                "f64.convert_s/i32" => NormalOp::Nop,
-                "f64.convert_u/i32" => NormalOp::Nop,
-                "f64.convert_s/i64" => NormalOp::Nop,
-                "f64.convert_u/i64" => NormalOp::Nop,
-                "f64.promote/f32" => NormalOp::Nop,
-                "f64.reinterpret/i64" => NormalOp::Nop,
-                "i32.reinterpret/f32" => NormalOp::Nop,
-                "i64.reinterpret/f64" => NormalOp::Nop,
+            match op.as_str() {
+                "nop" => {ops.push(NormalOp::Nop);},
+                // "block" => NormalOp::Nop,
+                // "loop" => NormalOp::Nop,
+                // "if" => NormalOp::Nop,
+                // "else" => NormalOp::Nop,
+                // "select" => NormalOp::Nop,
+                // "br" => NormalOp::Nop,
+                // "brif" => NormalOp::Nop,
+                // "brtable" => NormalOp::Nop,
+                "return" => {
+                    let num = parse_ops(args, ops);
+                    assert!(num == 0 || num == 1);
+                    ops.push(NormalOp::Return{has_arg: num == 1});
+                }
+                "unreachable" => { ops.push(NormalOp::Nop); }
+                "drop" => { ops.push(NormalOp::Nop); }
+                "end" => { ops.push(NormalOp::Nop); }
+                "i32.const" => { ops.push(NormalOp::Nop); }
+                "i64.const" => { ops.push(NormalOp::Nop); }
+                "f64.const" => { ops.push(NormalOp::Nop); }
+                "f32.const" => { ops.push(NormalOp::Nop); }
+                "get_local" => { ops.push(NormalOp::Nop); }
+                "set_local" => { ops.push(NormalOp::Nop); }
+                "tee_local" => { ops.push(NormalOp::Nop); }
+                "call" => { ops.push(NormalOp::Nop); }
+                "callindirect" => { ops.push(NormalOp::Nop); }
+                "callimport" => { ops.push(NormalOp::Nop); }
+                "i32.load8s" => { ops.push(NormalOp::Nop); }
+                "i32.load8u" => { ops.push(NormalOp::Nop); }
+                "i32.load16s" => { ops.push(NormalOp::Nop); }
+                "i32.load16u" => { ops.push(NormalOp::Nop); }
+                "i64.load8s" => { ops.push(NormalOp::Nop); }
+                "i64.load8u" => { ops.push(NormalOp::Nop); }
+                "i64.load16s" => { ops.push(NormalOp::Nop); }
+                "i64.load16u" => { ops.push(NormalOp::Nop); }
+                "i64.load32s" => { ops.push(NormalOp::Nop); }
+                "i64.load32u" => { ops.push(NormalOp::Nop); }
+                "i32.load" => { ops.push(NormalOp::Nop); }
+                "i64.load" => { ops.push(NormalOp::Nop); }
+                "f32.load" => { ops.push(NormalOp::Nop); }
+                "f64.load" => { ops.push(NormalOp::Nop); }
+                "i32.store8" => { ops.push(NormalOp::Nop); }
+                "i32.store16" => { ops.push(NormalOp::Nop); }
+                "i64.store8" => { ops.push(NormalOp::Nop); }
+                "i64.store16" => { ops.push(NormalOp::Nop); }
+                "i64.store32" => { ops.push(NormalOp::Nop); }
+                "i32.store" => { ops.push(NormalOp::Nop); }
+                "i64.store" => { ops.push(NormalOp::Nop); }
+                "f32.store" => { ops.push(NormalOp::Nop); }
+                "f64.store" => { ops.push(NormalOp::Nop); }
+                "current_memory" => { ops.push(NormalOp::Nop); }
+                "grow_memory" => { ops.push(NormalOp::Nop); }
+                "i32.add" => { ops.push(NormalOp::Nop); }
+                "i32.sub" => { ops.push(NormalOp::Nop); }
+                "i32.mul" => { ops.push(NormalOp::Nop); }
+                "i32.div_s" => { ops.push(NormalOp::Nop); }
+                "i32.div_u" => { ops.push(NormalOp::Nop); }
+                "i32.rem_s" => { ops.push(NormalOp::Nop); }
+                "i32.rem_u" => { ops.push(NormalOp::Nop); }
+                "i32.and" => { ops.push(NormalOp::Nop); }
+                "i32.or" => { ops.push(NormalOp::Nop); }
+                "i32.xor" => { ops.push(NormalOp::Nop); }
+                "i32.shl" => { ops.push(NormalOp::Nop); }
+                "i32.shr_u" => { ops.push(NormalOp::Nop); }
+                "i32.shr_s" => { ops.push(NormalOp::Nop); }
+                "i32.rotr" => { ops.push(NormalOp::Nop); }
+                "i32.rotl" => { ops.push(NormalOp::Nop); }
+                "i32.eq" => { ops.push(NormalOp::Nop); }
+                "i32.ne" => { ops.push(NormalOp::Nop); }
+                "i32.lt_s" => { ops.push(NormalOp::Nop); }
+                "i32.le_s" => { ops.push(NormalOp::Nop); }
+                "i32.lt_u" => { ops.push(NormalOp::Nop); }
+                "i32.le_u" => { ops.push(NormalOp::Nop); }
+                "i32.gt_s" => { ops.push(NormalOp::Nop); }
+                "i32.ge_s" => { ops.push(NormalOp::Nop); }
+                "i32.gt_u" => { ops.push(NormalOp::Nop); }
+                "i32.ge_u" => { ops.push(NormalOp::Nop); }
+                "i32.clz" => { ops.push(NormalOp::Nop); }
+                "i32.ctz" => { ops.push(NormalOp::Nop); }
+                "i32.popcnt" => { ops.push(NormalOp::Nop); }
+                "i32.eqz" => { ops.push(NormalOp::Nop); }
+                "i64.add" => { ops.push(NormalOp::Nop); }
+                "i64.sub" => { ops.push(NormalOp::Nop); }
+                "i64.mul" => { ops.push(NormalOp::Nop); }
+                "i64.divs" => { ops.push(NormalOp::Nop); }
+                "i64.divu" => { ops.push(NormalOp::Nop); }
+                "i64.rems" => { ops.push(NormalOp::Nop); }
+                "i64.remu" => { ops.push(NormalOp::Nop); }
+                "i64.and" => { ops.push(NormalOp::Nop); }
+                "i64.or" => { ops.push(NormalOp::Nop); }
+                "i64.xor" => { ops.push(NormalOp::Nop); }
+                "i64.shl" => { ops.push(NormalOp::Nop); }
+                "i64.shru" => { ops.push(NormalOp::Nop); }
+                "i64.shrs" => { ops.push(NormalOp::Nop); }
+                "i64.rotr" => { ops.push(NormalOp::Nop); }
+                "i64.rotl" => { ops.push(NormalOp::Nop); }
+                "i64.eq" => { ops.push(NormalOp::Nop); }
+                "i64.ne" => { ops.push(NormalOp::Nop); }
+                "i64.lts" => { ops.push(NormalOp::Nop); }
+                "i64.les" => { ops.push(NormalOp::Nop); }
+                "i64.ltu" => { ops.push(NormalOp::Nop); }
+                "i64.leu" => { ops.push(NormalOp::Nop); }
+                "i64.gts" => { ops.push(NormalOp::Nop); }
+                "i64.ges" => { ops.push(NormalOp::Nop); }
+                "i64.gtu" => { ops.push(NormalOp::Nop); }
+                "i64.geu" => { ops.push(NormalOp::Nop); }
+                "i64.clz" => { ops.push(NormalOp::Nop); }
+                "i64.ctz" => { ops.push(NormalOp::Nop); }
+                "i64.popcnt" => { ops.push(NormalOp::Nop); }
+                "i64.eqz" => { ops.push(NormalOp::Nop); }
+                "f32.add" => { ops.push(NormalOp::Nop); }
+                "f32.sub" => { ops.push(NormalOp::Nop); }
+                "f32.mul" => { ops.push(NormalOp::Nop); }
+                "f32.div" => { ops.push(NormalOp::Nop); }
+                "f32.min" => { ops.push(NormalOp::Nop); }
+                "f32.max" => { ops.push(NormalOp::Nop); }
+                "f32.abs" => { ops.push(NormalOp::Nop); }
+                "f32.neg" => { ops.push(NormalOp::Nop); }
+                "f32.copysign" => { ops.push(NormalOp::Nop); }
+                "f32.ceil" => { ops.push(NormalOp::Nop); }
+                "f32.floor" => { ops.push(NormalOp::Nop); }
+                "f32.trunc" => { ops.push(NormalOp::Nop); }
+                "f32.nearest" => { ops.push(NormalOp::Nop); }
+                "f32.sqrt" => { ops.push(NormalOp::Nop); }
+                "f32.eq" => { ops.push(NormalOp::Nop); }
+                "f32.ne" => { ops.push(NormalOp::Nop); }
+                "f32.lt" => { ops.push(NormalOp::Nop); }
+                "f32.le" => { ops.push(NormalOp::Nop); }
+                "f32.gt" => { ops.push(NormalOp::Nop); }
+                "f32.ge" => { ops.push(NormalOp::Nop); }
+                "f64.add" => { ops.push(NormalOp::Nop); }
+                "f64.sub" => { ops.push(NormalOp::Nop); }
+                "f64.mul" => { ops.push(NormalOp::Nop); }
+                "f64.div" => { ops.push(NormalOp::Nop); }
+                "f64.min" => { ops.push(NormalOp::Nop); }
+                "f64.max" => { ops.push(NormalOp::Nop); }
+                "f64.abs" => { ops.push(NormalOp::Nop); }
+                "f64.neg" => { ops.push(NormalOp::Nop); }
+                "f64.copysign" => { ops.push(NormalOp::Nop); }
+                "f64.ceil" => { ops.push(NormalOp::Nop); }
+                "f64.floor" => { ops.push(NormalOp::Nop); }
+                "f64.trunc" => { ops.push(NormalOp::Nop); }
+                "f64.nearest" => { ops.push(NormalOp::Nop); }
+                "f64.sqrt" => { ops.push(NormalOp::Nop); }
+                "f64.eq" => { ops.push(NormalOp::Nop); }
+                "f64.ne" => { ops.push(NormalOp::Nop); }
+                "f64.lt" => { ops.push(NormalOp::Nop); }
+                "f64.le" => { ops.push(NormalOp::Nop); }
+                "f64.gt" => { ops.push(NormalOp::Nop); }
+                "f64.ge" => { ops.push(NormalOp::Nop); }
+                "i32.trunc_s/f32" => { ops.push(NormalOp::Nop); }
+                "i32.trunc_s/f64" => { ops.push(NormalOp::Nop); }
+                "i32.trunc_u/f32" => { ops.push(NormalOp::Nop); }
+                "i32.trunc_u/f64" => { ops.push(NormalOp::Nop); }
+                "i32.wrap/i64" => { ops.push(NormalOp::Nop); }
+                "i64.trunc_s/f32" => { ops.push(NormalOp::Nop); }
+                "i64.trunc_s/f64" => { ops.push(NormalOp::Nop); }
+                "i64.trunc_u/f32" => { ops.push(NormalOp::Nop); }
+                "i64.trunc_u/f64" => { ops.push(NormalOp::Nop); }
+                "i64.extend_s/i32" => { ops.push(NormalOp::Nop); }
+                "i64.extend_u/i32" => { ops.push(NormalOp::Nop); }
+                "f32.convert_s/i32" => { ops.push(NormalOp::Nop); }
+                "f32.convert_u/i32" => { ops.push(NormalOp::Nop); }
+                "f32.convert_s/i64" => { ops.push(NormalOp::Nop); }
+                "f32.convert_u/i64" => { ops.push(NormalOp::Nop); }
+                "f32.demote/f64" => { ops.push(NormalOp::Nop); }
+                "f32.reinterpret/i32" => { ops.push(NormalOp::Nop); }
+                "f64.convert_s/i32" => { ops.push(NormalOp::Nop); }
+                "f64.convert_u/i32" => { ops.push(NormalOp::Nop); }
+                "f64.convert_s/i64" => { ops.push(NormalOp::Nop); }
+                "f64.convert_u/i64" => { ops.push(NormalOp::Nop); }
+                "f64.promote/f32" => { ops.push(NormalOp::Nop); }
+                "f64.reinterpret/i64" => { ops.push(NormalOp::Nop); }
+                "i32.reinterpret/f32" => { ops.push(NormalOp::Nop); }
+                "i64.reinterpret/f64" => { ops.push(NormalOp::Nop); }
                 _ => panic!("unexpected instr: {}", op)
             };
         };
         _ => panic!("unexpected instr: {}", s)
     );
-    panic!();
 }
 
-fn parse_int(node: &Sexpr) -> usize {
+fn parse_int(node: &Sexpr) -> i64 {
     match node {
         &Sexpr::Identifier(ref text) => {
-            str::parse(text).unwrap()
+            if text.starts_with("0x") {
+                i64::from_str_radix(&text[2..], 16).unwrap()
+            } else {
+                str::parse(text).unwrap()
+            }
         }
         _ => panic!("expected number id: {}", node)
     }

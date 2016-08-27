@@ -1,7 +1,7 @@
-use std::mem;
+use std::{mem, str};
 use std::num::Wrapping;
 
-use module::{Module, FunctionIndex};
+use module::{Module, FunctionIndex, AsBytes};
 use types::{Type, Dynamic, IntType, FloatType};
 use ops::{
     BlockOp, Block, NormalOp, Sign, Size, MemImm,
@@ -107,9 +107,9 @@ impl Memory {
 
 }
 
-pub struct Instance<'a> {
-    memory: Memory,
-    module: &'a Module<'a>,
+pub struct Instance<'a, B: AsBytes + 'a> {
+    pub memory: Memory,
+    pub module: &'a Module<B>,
 }
 
 fn read_u32(data: &[u8]) -> u32 {
@@ -119,15 +119,16 @@ fn read_u32(data: &[u8]) -> u32 {
     ((data[3] as u32) << 3*8)
 }
 
-impl<'a> Instance<'a> {
-    pub fn new(module: &'a Module<'a>) -> Instance<'a> {
+impl<'a, B: AsBytes> Instance<'a, B> {
+    pub fn new(module: &'a Module<B>) -> Instance<'a, B> {
         let mut memory = Vec::with_capacity(module.memory_info.initial_64k_pages * 64 * 1024);
         memory.resize(module.memory_info.initial_64k_pages * 64 * 1024, 0);
 
         for m in &module.memory_chunks {
-            let newlen = ::std::cmp::min(m.offset + m.data.len(), memory.len());
+            let data = m.data.as_bytes();
+            let newlen = ::std::cmp::min(m.offset + data.len(), memory.len());
             memory.resize(newlen, 0);
-            memory[m.offset..m.offset + m.data.len()].copy_from_slice(&m.data);
+            memory[m.offset..m.offset + data.len()].copy_from_slice(data);
         }
 
         Instance {
@@ -137,11 +138,14 @@ impl<'a> Instance<'a> {
     }
 
     pub fn invoke(&mut self, func: FunctionIndex, args: &[Dynamic]) -> Option<Dynamic> {
-        println!("running {}", self.module.find_name(func).unwrap_or("<unknown>"));
+        println!("running {}",
+            self.module.find_name(func)
+                .and_then(|n| str::from_utf8(n).ok())
+                .unwrap_or("<unknown>"));
 
-        let ty = self.module.functions[func.0];
-        if args.len() != ty.param_types.len() {
-            panic!("expected {} args, but got {}", ty.param_types.len(), args.len());
+        let ty = &self.module.functions[func.0];
+        if args.len() != ty.param_types.as_bytes().len() {
+            panic!("expected {} args, but got {}", ty.param_types.as_bytes().len(), args.len());
         }
         let f = &self.module.code[func.0];
 
@@ -152,8 +156,8 @@ impl<'a> Instance<'a> {
         locals.resize(args.len() + local_count, Dynamic::from_u32(0));
         locals[..args.len()].copy_from_slice(args);
 
-        struct Context<'b, 'a: 'b> {
-            instance: &'b mut Instance<'a>,
+        struct Context<'b, 'a: 'b, B: AsBytes + 'a> {
+            instance: &'b mut Instance<'a, B>,
             locals: Vec<Dynamic>,
             stack: Vec<Dynamic>,
         }
@@ -176,7 +180,7 @@ impl<'a> Instance<'a> {
             ($val:expr) => {{ let val = $val; match val { Res::Value(v) => {}, val => return val}}}
         }
 
-        fn run_block<'a>(context: &'a mut Context, ops: &[BlockOp]) -> Res {
+        fn run_block<'a, B: AsBytes>(context: &'a mut Context<B>, ops: &[BlockOp]) -> Res {
             if ops.len() > 0 {
                 for i in &ops[..ops.len() - 1] {
                     match run_instr(context, i) {
@@ -191,7 +195,7 @@ impl<'a> Instance<'a> {
             }
         }
 
-        fn run_instr<'a>(context: &'a mut Context, op: &BlockOp) -> Res {
+        fn run_instr<'a, B: AsBytes>(context: &'a mut Context<B>, op: &BlockOp) -> Res {
             println!("run {}", op);
             match op {
                 &BlockOp::Block(Block::Block(ref ops)) => match run_block(context, ops) {

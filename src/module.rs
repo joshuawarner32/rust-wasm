@@ -2,24 +2,45 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::{str, mem, fmt};
 use std::cmp::min;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeSet};
 use std::path::Path;
 use std::ops::Deref;
 use std::num::Wrapping;
 
 use types::{Type, Pr};
 use reader::Reader;
-use ops::{LinearOpReader, BlockOpReader};
+use ops::{NormalOp, LinearOpReader, BlockOpReader};
 
 struct Chunk<'a> {
-    name: &'a str,
+    name: &'a [u8],
     data: &'a [u8]
 }
 
+pub trait AsBytes {
+    fn as_bytes(&self) -> &[u8];
+}
+
+impl AsBytes {
+    fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+}
+
+impl<'a> AsBytes for &'a [u8] {
+    fn as_bytes(&self) -> &[u8] {
+        *self
+    }
+}
+
+impl AsBytes for Vec<u8> {
+    fn as_bytes(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
 
 fn read_chunk<'a>(reader: &mut Reader<'a>) -> Chunk<'a> {
     Chunk {
-        name: reader.read_str(),
+        name: reader.read_bytes(),
         data: reader.read_bytes()
     }
 }
@@ -34,26 +55,34 @@ pub struct TableIndex(pub usize);
 pub struct ImportIndex(pub usize);
 
 #[derive(Copy, Clone)]
-pub struct FunctionType<'a> {
-    pub param_types: &'a[Type],
+pub struct FunctionType<B: AsBytes> {
+    pub param_types: B,
     pub return_type: Option<Type>
 }
 
-impl<'a> fmt::Display for FunctionType<'a> {
+impl<B: AsBytes> fmt::Display for FunctionType<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "(");
         let mut first = true;
-        for p in self.param_types {
+        for p in as_type_slice(self.param_types.as_bytes()) {
             write!(f, "{}{}", if first { first = false; ""} else {", "}, p);
         }
         write!(f, ") -> {}", Pr(self.return_type))
     }
 }
 
-pub struct Import<'a> {
-    pub function_type: FunctionType<'a>,
-    pub module_name: &'a str,
-    pub function_name: &'a str,
+#[test]
+fn test_fn_ty_display() {
+    assert_eq!("(i32, i64, f32, f64) -> void", format!("{}", FunctionType {
+        param_types: vec!(1, 2, 3, 4),
+        return_type: None
+    }));
+}
+
+pub struct Import<B: AsBytes> {
+    pub function_type: FunctionType<B>,
+    pub module_name: B,
+    pub function_name: B,
 }
 
 pub struct MemoryInfo {
@@ -62,69 +91,83 @@ pub struct MemoryInfo {
     pub is_exported: bool
 }
 
-pub struct Export<'a> {
+pub struct Export<B: AsBytes> {
     pub function_index: FunctionIndex,
-    pub function_name: &'a str
+    pub function_name: B
 }
 
-pub struct FunctionBody<'a> {
+pub struct FunctionBody<B: AsBytes> {
     pub locals: Vec<(Type, usize)>,
-    pub ast: &'a [u8]
+    pub ast: B
 }
 
-impl<'a> FunctionBody<'a> {
+impl<B: AsBytes> FunctionBody<B> {
     pub fn linear_ops(&self) -> LinearOpReader {
-        LinearOpReader::new(self.ast)
+        LinearOpReader::new(self.ast.as_bytes())
     }
     pub fn block_ops(&self) -> BlockOpReader {
-        BlockOpReader::new(self.ast)
+        BlockOpReader::new(self.ast.as_bytes())
     }
 }
 
-pub struct MemoryChunk<'a> {
+pub struct MemoryChunk<B: AsBytes> {
     pub offset: usize,
-    pub data: &'a [u8]
+    pub data: B,
 }
 
-pub struct Names<'a> {
-    pub function_name: &'a str,
-    pub local_names: Vec<&'a str>
+pub struct Names<B: AsBytes> {
+    pub function_name: B,
+    pub local_names: Vec<B>,
 }
 
-pub struct Module<'a> {
-    types: Vec<FunctionType<'a>>,
-    pub imports: Vec<Import<'a>>,
-    pub functions: Vec<FunctionType<'a>>,
+pub struct Module<B: AsBytes> {
+    types: Vec<FunctionType<B>>,
+    pub imports: Vec<Import<B>>,
+    pub functions: Vec<FunctionType<B>>,
     pub table: Vec<FunctionIndex>,
     pub memory_info: MemoryInfo,
     pub start_function_index: Option<FunctionIndex>,
-    pub exports: Vec<Export<'a>>,
-    pub code: Vec<FunctionBody<'a>>,
-    pub memory_chunks: Vec<MemoryChunk<'a>>,
-    pub names: Vec<Names<'a>>
+    pub exports: Vec<Export<B>>,
+    pub code: Vec<FunctionBody<B>>,
+    pub memory_chunks: Vec<MemoryChunk<B>>,
+    pub names: Vec<Names<B>>
 }
 
-pub struct ModuleBuilder {
-    // types: Vec<FunctionType>,
-    // pub imports: Vec<Import>,
-    // pub functions: Vec<FunctionType>,
-    // pub table: Vec<FunctionIndex>,
-    pub memory_info: MemoryInfo,
-    // pub start_function_index: Option<FunctionIndex>,
-    // pub exports: Vec<Export>,
-    // pub code: Vec<FunctionBody>,
-    // pub memory_chunks: Vec<MemoryChunk>,
-    // pub names: Vec<Names>
+pub struct FunctionBuilder {
+    pub ty: FunctionType<Vec<u8>>,
+    pub ops: Vec<NormalOp<'static>>,
+    pub local_types: Vec<Type>,
 }
 
-impl ModuleBuilder {
-    pub fn new() -> ModuleBuilder {
-        ModuleBuilder {
-            memory_info: MemoryInfo {
-                initial_64k_pages: 1,
-                maximum_64k_pages: 1,
-                is_exported: true
+impl FunctionBuilder {
+    pub fn new() -> FunctionBuilder {
+        FunctionBuilder {
+            ty: FunctionType {
+                param_types: Vec::new(),
+                return_type: None,
             },
+            ops: Vec::new(),
+            local_types: Vec::new(),
+        }
+    }
+    pub fn build(self) -> FunctionBody<Vec<u8>> {
+        let mut locals = Vec::new();
+        let mut last = (Type::Int32, 0);
+
+        for ty in self.local_types {
+            if last.0 == ty {
+                last.1 += 1;
+            } else {
+                locals.push(last);
+                last = (ty, 1);
+            }
+        }
+
+        let mut ast = Vec::new();
+
+        FunctionBody {
+            locals: locals,
+            ast: ast,
         }
     }
 }
@@ -147,8 +190,8 @@ fn singular<T: Copy>(ts: &[T]) -> Option<T> {
     }
 }
 
-impl<'a> Module<'a> {
-    fn new() -> Module<'a> {
+impl<B: AsBytes> Module<B> {
+    pub fn new() -> Module<B> {
         Module {
             types: Vec::new(),
             imports: Vec::new(),
@@ -167,7 +210,30 @@ impl<'a> Module<'a> {
         }
     }
 
-    pub fn parse(data: &'a [u8]) -> Module<'a> {
+    pub fn find(&self, name: &[u8]) -> Option<FunctionIndex> {
+        for e in &self.exports {
+            if e.function_name.as_bytes() == name {
+                return Some(e.function_index);
+            }
+        }
+        None
+    }
+
+    pub fn find_name(&self, index: FunctionIndex) -> Option<&[u8]> {
+        if self.names.len() > index.0 {
+            return Some(self.names[index.0].function_name.as_bytes());
+        }
+        for e in &self.exports {
+            if e.function_index == index {
+                return Some(e.function_name.as_bytes());
+            }
+        }
+        None
+    }
+}
+
+impl<'a> Module<&'a [u8]> {
+    pub fn parse(data: &'a [u8]) -> Module<&'a [u8]> {
         let mut types = None;
         let mut imports = None;
         let mut functions = None;
@@ -188,7 +254,7 @@ impl<'a> Module<'a> {
             let c = read_chunk(&mut r);
             let mut r = Reader::new(c.data);
             match c.name {
-                "type" => {
+                b"type" => {
                     if types.is_some() {
                         panic!("duplicate type chunk!");
                     }
@@ -203,14 +269,14 @@ impl<'a> Module<'a> {
                         }
 
                         tys.push(FunctionType {
-                            param_types: as_type_slice(r.read_bytes()),
+                            param_types: r.read_bytes(),
                             return_type: singular(as_type_slice(r.read_bytes()))
                         });
                     }
 
                     types = Some(tys);
                 }
-                "import" => {
+                b"import" => {
                     if imports.is_some() {
                         panic!("duplicate import chunk!");
                     }
@@ -222,8 +288,8 @@ impl<'a> Module<'a> {
                         for _ in 0..count {
                             ims.push(Import {
                                 function_type: tys[r.read_var_u32() as usize],
-                                module_name: r.read_str(),
-                                function_name: r.read_str()
+                                module_name: r.read_bytes(),
+                                function_name: r.read_bytes()
                             });
                         }
                         imports = Some(ims);
@@ -231,7 +297,7 @@ impl<'a> Module<'a> {
                         panic!("need type chunk to decode imports!");
                     }
                 }
-                "function" => {
+                b"function" => {
                     if functions.is_some() {
                         panic!("duplicate function chunk!");
                     }
@@ -248,7 +314,7 @@ impl<'a> Module<'a> {
                         panic!("need type chunk to decode functions!");
                     }
                 }
-                "table" => {
+                b"table" => {
                     if table.is_some() {
                         panic!("duplicate table chunk!");
                     }
@@ -269,7 +335,7 @@ impl<'a> Module<'a> {
                         panic!("need functions chunk to decode table!");
                     }
                 }
-                "memory" => {
+                b"memory" => {
                     if memory_info.is_some() {
                         panic!("duplicate memory chunk!");
                     }
@@ -279,7 +345,7 @@ impl<'a> Module<'a> {
                         is_exported: r.read_u8() == 1,
                     });
                 }
-                "export" => {
+                b"export" => {
                     if exports.is_some() {
                         panic!("duplicate export chunk!");
                     }
@@ -295,7 +361,7 @@ impl<'a> Module<'a> {
                             }
                             exp.push(Export {
                                 function_index: FunctionIndex(ind),
-                                function_name: r.read_str(),
+                                function_name: r.read_bytes(),
                             });
                         }
                         exports = Some(exp);
@@ -303,7 +369,7 @@ impl<'a> Module<'a> {
                         panic!("need functions chunk to decode exports!");
                     }
                 }
-                "start" => {
+                b"start" => {
                     if start_function_index.is_some() {
                         panic!("duplicate start chunk!");
                     }
@@ -318,7 +384,7 @@ impl<'a> Module<'a> {
                         panic!("need functions chunk to decode start!");
                     }
                 }
-                "code" => {
+                b"code" => {
                     if code.is_some() {
                         panic!("duplicate code chunk!");
                     }
@@ -354,7 +420,7 @@ impl<'a> Module<'a> {
                         panic!("need functions chunk to decode code!");
                     }
                 }
-                "data" => {
+                b"data" => {
                     if memory_chunks.is_some() {
                         panic!("duplicate data chunk!");
                     }
@@ -370,7 +436,7 @@ impl<'a> Module<'a> {
                     }
                     memory_chunks = Some(mc);
                 }
-                "name" => {
+                b"name" => {
                     if names.is_some() {
                         panic!("duplicate data chunk!");
                     }
@@ -378,12 +444,12 @@ impl<'a> Module<'a> {
                     let mut nm = Vec::with_capacity(count);
 
                     for _ in 0..count {
-                        let fn_name = r.read_str();
+                        let fn_name = r.read_bytes();
                         let local_count = r.read_var_i32() as usize;
                         let mut local_names = Vec::with_capacity(local_count);
 
                         for _ in 0..local_count {
-                            local_names.push(r.read_str());
+                            local_names.push(r.read_bytes());
                         }
 
                         nm.push(Names {
@@ -425,26 +491,5 @@ impl<'a> Module<'a> {
         }
 
         panic!("missing critical chunk!");
-    }
-
-    pub fn find(&self, name: &str) -> Option<FunctionIndex> {
-        for e in &self.exports {
-            if e.function_name == name {
-                return Some(e.function_index);
-            }
-        }
-        None
-    }
-
-    pub fn find_name(&self, index: FunctionIndex) -> Option<&'a str> {
-        for e in &self.exports {
-            if e.function_index == index {
-                return Some(e.function_name);
-            }
-        }
-        if self.names.len() > index.0 {
-            return Some(self.names[index.0].function_name);
-        }
-        None
     }
 }

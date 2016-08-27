@@ -2,7 +2,7 @@ use std::{str, mem, fmt};
 use std::num::Wrapping;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Type {
     Int32 = 1,
     Int64 = 2,
@@ -16,6 +16,10 @@ impl Type {
             panic!();
         }
         unsafe { mem::transmute(val) }
+    }
+
+    pub fn to_u8(&self) -> u8 {
+        unsafe { mem::transmute(*self) }
     }
 }
 
@@ -71,7 +75,7 @@ impl fmt::Display for FloatType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Dynamic {
     Int32(Wrapping<u32>),
     Int64(Wrapping<u64>),
@@ -87,6 +91,12 @@ impl fmt::Display for Dynamic {
             &Dynamic::Float32(val) => write!(f, "f32:{}", val),
             &Dynamic::Float64(val) => write!(f, "f64:{}", val),
         }
+    }
+}
+
+impl fmt::Debug for Dynamic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fmt::Display::fmt(self, f)
     }
 }
 

@@ -6,12 +6,6 @@ use std::io::Read;
 
 use wasm::Dynamic;
 
-fn to_hex_string(bytes: &[u8]) -> String {
-    bytes.iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>().join(" ")
-}
-
 fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 2 {
@@ -26,8 +20,8 @@ fn main() {
 
     let mut inst = wasm::Instance::new(&module);
 
-    let esp = module.find("establishStackSpace").unwrap();
-    let main = module.find("_main").unwrap();
+    let esp = module.find(b"establishStackSpace").unwrap();
+    let main = module.find(b"_main").unwrap();
 
     inst.invoke(esp, &[Dynamic::from_u32(4*1024), Dynamic::from_u32(16*1024)]);
 

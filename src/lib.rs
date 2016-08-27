@@ -8,6 +8,6 @@ mod testcase;
 mod sexpr;
 
 pub use types::Dynamic;
-pub use module::Module;
+pub use module::{Module, FunctionIndex};
 pub use interp::Instance;
 pub use testcase::TestCase;

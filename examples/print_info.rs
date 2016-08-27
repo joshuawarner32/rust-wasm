@@ -1,6 +1,6 @@
 extern crate wasm;
 
-use std::env;
+use std::{env, str};
 use std::fs::File;
 use std::io::Read;
 
@@ -24,12 +24,17 @@ fn main() {
 
     println!("imports:");
     for i in m.imports {
-        println!("  {}.{}{}", i.module_name, i.function_name, i.function_type);
+        println!("  {}.{}{}",
+            str::from_utf8(i.module_name).unwrap(),
+            str::from_utf8(i.function_name).unwrap(),
+            i.function_type);
     }
 
     println!("functions:");
     for (i, f) in m.functions.iter().enumerate() {
-        let name = m.names.get(i).map(|e| e.function_name).unwrap_or("<unnamed>");
+        let name = m.names.get(i)
+            .and_then(|e| str::from_utf8(e.function_name).ok())
+            .unwrap_or("<unnamed>");
         println!("  {}{}", name, f);
 
         let code = &m.code[i];
@@ -45,14 +50,18 @@ fn main() {
 
     println!("exports:");
     for e in m.exports {
-        let name = m.names.get(e.function_index.0).map(|e| e.function_name).unwrap_or("<unnamed>");
+        let name = m.names.get(e.function_index.0)
+            .and_then(|e| str::from_utf8(e.function_name).ok())
+            .unwrap_or("<unnamed>");
         let ty = m.functions[e.function_index.0];
-        println!("  {} = {}{}", e.function_name, name, ty);
+        println!("  {} = {}{}", str::from_utf8(e.function_name).unwrap(), name, ty);
     }
 
     println!("dynamic function table:");
     for (i, t) in m.table.iter().enumerate() {
-        let name = m.names.get(t.0).map(|e| e.function_name).unwrap_or("<unnamed>");
+        let name = m.names.get(t.0)
+            .and_then(|e| str::from_utf8(e.function_name).ok())
+            .unwrap_or("<unnamed>");
         let ty = m.functions[t.0];
         println!("  {} = {}{}", i, name, ty);
     }
@@ -64,7 +73,9 @@ fn main() {
 
     println!("start function:");
     if let Some(i) = m.start_function_index {
-        let name = m.names.get(i.0).map(|e| e.function_name).unwrap_or("<unnamed>");
+        let name = m.names.get(i.0)
+            .and_then(|e| str::from_utf8(e.function_name).ok())
+            .unwrap_or("<unnamed>");
         let ty = m.functions[i.0];
         println!("  {}{}", name, ty);
     } else {
