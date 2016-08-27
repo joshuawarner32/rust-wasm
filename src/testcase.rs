@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use sexpr::Sexpr;
 use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex};
 use types::{Type, Dynamic, IntType, FloatType};
-use ops::{NormalOp, IntBinOp};
-use interp::Instance;
+use ops::{NormalOp, IntBinOp, IntUnOp, IntCmpOp};
+use interp::{Instance, InterpResult};
 
 macro_rules! vec_form {
     ($val:expr => () => $code:expr) => {{
@@ -91,7 +91,7 @@ pub struct Invoke {
 }
 
 impl Invoke {
-    fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) -> Option<Dynamic> {
+    fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) -> InterpResult {
         let func = instance.module.find(self.function_name.as_bytes()).unwrap();
         instance.invoke(func, &self.arguments)
     }
@@ -106,10 +106,10 @@ impl Assert {
     fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) {
         match self {
             &Assert::Return(ref invoke, result) => {
-                assert_eq!(invoke.run(instance), Some(result));
+                assert_eq!(invoke.run(instance), InterpResult::Value(Some(result)));
             }
             &Assert::Trap(ref invoke) => {
-                panic!();
+                assert_eq!(invoke.run(instance), InterpResult::Trap);
             }
         }
     }
@@ -421,34 +421,118 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                     assert_eq!(parse_ops(args, ops, local_names), 2);
                     ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Add));
                 }
-                "i32.sub" => { ops.push(NormalOp::Nop); }
-                "i32.mul" => { ops.push(NormalOp::Nop); }
-                "i32.div_s" => { ops.push(NormalOp::Nop); }
-                "i32.div_u" => { ops.push(NormalOp::Nop); }
-                "i32.rem_s" => { ops.push(NormalOp::Nop); }
-                "i32.rem_u" => { ops.push(NormalOp::Nop); }
-                "i32.and" => { ops.push(NormalOp::Nop); }
-                "i32.or" => { ops.push(NormalOp::Nop); }
-                "i32.xor" => { ops.push(NormalOp::Nop); }
-                "i32.shl" => { ops.push(NormalOp::Nop); }
-                "i32.shr_u" => { ops.push(NormalOp::Nop); }
-                "i32.shr_s" => { ops.push(NormalOp::Nop); }
-                "i32.rotr" => { ops.push(NormalOp::Nop); }
-                "i32.rotl" => { ops.push(NormalOp::Nop); }
-                "i32.eq" => { ops.push(NormalOp::Nop); }
-                "i32.ne" => { ops.push(NormalOp::Nop); }
-                "i32.lt_s" => { ops.push(NormalOp::Nop); }
-                "i32.le_s" => { ops.push(NormalOp::Nop); }
-                "i32.lt_u" => { ops.push(NormalOp::Nop); }
-                "i32.le_u" => { ops.push(NormalOp::Nop); }
-                "i32.gt_s" => { ops.push(NormalOp::Nop); }
-                "i32.ge_s" => { ops.push(NormalOp::Nop); }
-                "i32.gt_u" => { ops.push(NormalOp::Nop); }
-                "i32.ge_u" => { ops.push(NormalOp::Nop); }
-                "i32.clz" => { ops.push(NormalOp::Nop); }
-                "i32.ctz" => { ops.push(NormalOp::Nop); }
-                "i32.popcnt" => { ops.push(NormalOp::Nop); }
-                "i32.eqz" => { ops.push(NormalOp::Nop); }
+                "i32.sub" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Sub));
+                }
+                "i32.mul" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Mul));
+                }
+                "i32.div_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::DivS));
+                }
+                "i32.div_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::DivU));
+                }
+                "i32.rem_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::RemS));
+                }
+                "i32.rem_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::RemU));
+                }
+                "i32.and" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::And));
+                }
+                "i32.or" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Or));
+                }
+                "i32.xor" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Xor));
+                }
+                "i32.shl" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Shl));
+                }
+                "i32.shr_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::ShrU));
+                }
+                "i32.shr_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::ShrS));
+                }
+                "i32.rotr" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Rotr));
+                }
+                "i32.rotl" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Rotl));
+                }
+                "i32.eq" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::Eq));
+                }
+                "i32.ne" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::Ne));
+                }
+                "i32.lt_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtS));
+                }
+                "i32.le_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeS));
+                }
+                "i32.lt_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtU));
+                }
+                "i32.le_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeU));
+                }
+                "i32.gt_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtS));
+                }
+                "i32.ge_s" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeS));
+                }
+                "i32.gt_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtU));
+                }
+                "i32.ge_u" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeU));
+                }
+                "i32.clz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Clz));
+                }
+                "i32.ctz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Ctz));
+                }
+                "i32.popcnt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Popcnt));
+                }
+                "i32.eqz" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntEqz(IntType::Int32));
+                }
                 "i64.add" => { ops.push(NormalOp::Nop); }
                 "i64.sub" => { ops.push(NormalOp::Nop); }
                 "i64.mul" => { ops.push(NormalOp::Nop); }

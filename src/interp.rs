@@ -119,6 +119,12 @@ fn read_u32(data: &[u8]) -> u32 {
     ((data[3] as u32) << 3*8)
 }
 
+#[derive(PartialEq, Debug)]
+pub enum InterpResult {
+    Value(Option<Dynamic>),
+    Trap,
+}
+
 impl<'a, B: AsBytes> Instance<'a, B> {
     pub fn new(module: &'a Module<B>) -> Instance<'a, B> {
         let mut memory = Vec::with_capacity(module.memory_info.initial_64k_pages * 64 * 1024);
@@ -137,7 +143,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         }
     }
 
-    pub fn invoke(&mut self, func: FunctionIndex, args: &[Dynamic]) -> Option<Dynamic> {
+    pub fn invoke(&mut self, func: FunctionIndex, args: &[Dynamic]) -> InterpResult {
         println!("running {}",
             self.module.find_name(func)
                 .and_then(|n| str::from_utf8(n).ok())
@@ -165,7 +171,8 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         enum Res {
             Value(Option<Dynamic>),
             Branch(u32, Option<Dynamic>),
-            Return(Option<Dynamic>)
+            Return(Option<Dynamic>),
+            Trap,
         }
 
         macro_rules! prv {
@@ -207,6 +214,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     loop {
                         match run_block(context, ops) {
                             val@ Res::Return(_) => return val,
+                            val@ Res::Trap => return val,
                             val@ Res::Value(_) => return val,
                             Res::Branch(0, _) => continue,
                             Res::Branch(1, val) => return Res::Value(val),
@@ -299,7 +307,10 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         let stack_len = context.stack.len();
                         let res = {
                             let args = &context.stack[stack_len - argument_count as usize..];
-                            Res::Value(context.instance.invoke(index, &args))
+                            match context.instance.invoke(index, &args) {
+                                InterpResult::Value(v) => Res::Value(v),
+                                InterpResult::Trap => return Res::Trap,
+                            }
                         };
                         context.stack.drain(stack_len - argument_count as usize..);
                         res
@@ -312,7 +323,10 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         let stack_len = context.stack.len();
                         let res = {
                             let args = &context.stack[stack_len - argument_count as usize..];
-                            Res::Value(context.instance.invoke(index, &args))
+                            match context.instance.invoke(index, &args) {
+                                InterpResult::Value(v) => Res::Value(v),
+                                InterpResult::Trap => return Res::Trap,
+                            }
                         };
                         context.stack.drain(stack_len - argument_count as usize..);
                         res
@@ -352,7 +366,10 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     &NormalOp::IntBin(inttype, intbinop) => {
                         let b = context.stack.pop().unwrap();
                         let a = context.stack.pop().unwrap();
-                        Res::Value(Some(interp_int_bin(inttype, intbinop, a, b)))
+                        match interp_int_bin(inttype, intbinop, a, b) {
+                            InterpResult::Value(v) => Res::Value(v),
+                            InterpResult::Trap => Res::Trap,
+                        }
                     }
                     &NormalOp::IntCmp(inttype, intcmpop) => {
                         let b = context.stack.pop().unwrap();
@@ -416,7 +433,8 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         };
 
         let res = match run_block(&mut context, &root_ops) {
-            Res::Value(v) | Res::Return(v) => v,
+            Res::Value(v) | Res::Return(v) => InterpResult::Value(v),
+            Res::Trap => InterpResult::Trap,
             _ => panic!()
         };
 
@@ -442,7 +460,7 @@ fn u64_from_i64(val: Wrapping<i64>) -> Wrapping<u64> {
     unsafe { mem::transmute(val) }
 }
 
-fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> Dynamic {
+fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> InterpResult {
     assert!(a.get_type() == ty.to_type());
     assert!(b.get_type() == ty.to_type());
 
@@ -455,27 +473,77 @@ fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> Dynamic 
         IntBinOp::Mul => a * b,
         IntBinOp::DivS => {
             match ty {
-                IntType::Int32 => u64_from_i64(i64_from_i32(a) / i64_from_i32(b)),
-                IntType::Int64 => u64_from_i64(i64_from_u64(a) / i64_from_u64(b)),
+                IntType::Int32 => {
+                    let a = i64_from_i32(a);
+                    let b = i64_from_i32(b);
+                    if b.0 == 0 || (b.0 == -1 && a.0 == i32::min_value() as i64) {
+                        return InterpResult::Trap;
+                    } else {
+                        u64_from_i64(a / b)
+                    }
+                },
+                IntType::Int64 => {
+                    let a = i64_from_u64(a);
+                    let b = i64_from_u64(b);
+                    if b.0 == 0 || (b.0 == -1 && a.0 == i64::min_value()) {
+                        return InterpResult::Trap;
+                    } else {
+                        u64_from_i64(a / b)
+                    }
+                },
             }
         }
-        IntBinOp::DivU => a / b,
+        IntBinOp::DivU => if b.0 == 0 {
+            return InterpResult::Trap;
+        } else {
+            a / b
+        },
         IntBinOp::RemS => {
             match ty {
-                IntType::Int32 => u64_from_i64(i64_from_i32(a) % i64_from_i32(b)),
-                IntType::Int64 => u64_from_i64(i64_from_u64(a) % i64_from_u64(b)),
+                IntType::Int32 => {
+                    let a = i64_from_i32(a);
+                    let b = i64_from_i32(b);
+                    if b.0 == 0 {
+                        return InterpResult::Trap;
+                    } else {
+                        u64_from_i64(a % b)
+                    }
+                },
+                IntType::Int64 => {
+                    let a = i64_from_u64(a);
+                    let b = i64_from_u64(b);
+                    if b.0 == 0 {
+                        return InterpResult::Trap;
+                    } else {
+                        u64_from_i64(a % b)
+                    }
+                },
             }
         }
-        IntBinOp::RemU => a % b,
+        IntBinOp::RemU => if b.0 == 0 {
+            return InterpResult::Trap;
+        } else {
+            a % b
+        },
         IntBinOp::And => a & b,
         IntBinOp::Or => a | b,
         IntBinOp::Xor => a ^ b,
-        IntBinOp::Shl => a << b.0 as usize,
-        IntBinOp::ShrU => a >> b.0 as usize,
+        IntBinOp::Shl => {
+            match ty {
+                IntType::Int32 => a << ((b.0 as usize) & 31),
+                IntType::Int64 => a << ((b.0 as usize) & 63),
+            }
+        }
+        IntBinOp::ShrU => {
+            match ty {
+                IntType::Int32 => a >> ((b.0 as usize) & 31),
+                IntType::Int64 => a >> ((b.0 as usize) & 63),
+            }
+        }
         IntBinOp::ShrS => {
             match ty {
-                IntType::Int32 => u64_from_i64(i64_from_i32(a) >> b.0 as usize),
-                IntType::Int64 => u64_from_i64(i64_from_u64(a) >> b.0 as usize),
+                IntType::Int32 => u64_from_i64(i64_from_i32(a) >> ((b.0 as usize) & 31)),
+                IntType::Int64 => u64_from_i64(i64_from_u64(a) >> ((b.0 as usize) & 63)),
             }
         }
         IntBinOp::Rotr => {
@@ -492,10 +560,10 @@ fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> Dynamic 
         }
     };
 
-    match ty {
+    InterpResult::Value(Some(match ty {
         IntType::Int32 => Dynamic::from_u32(res.0 as u32),
         IntType::Int64 => Dynamic::from_u64(res.0),
-    }
+    }))
 }
 
 fn extend_signed(val: Wrapping<u64>, ty: IntType) -> Wrapping<i64> {
