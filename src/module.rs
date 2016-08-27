@@ -1,8 +1,8 @@
 use std::{str, mem, fmt};
 
-use types::{Type, Pr};
+use types::{Type, Pr, IntType};
 use reader::Reader;
-use ops::{NormalOp, LinearOpReader, BlockOpReader};
+use ops::{NormalOp, LinearOpReader, BlockOpReader, IntBinOp};
 
 struct Chunk<'a> {
     name: &'a [u8],
@@ -151,6 +151,22 @@ impl FunctionBuilder {
         }
 
         let mut ast = Vec::new();
+
+        for op in self.ops {
+            match op {
+                NormalOp::IntBin(IntType::Int32, IntBinOp::Add) => ast.push(0x40),
+                NormalOp::Return{has_arg} => {
+                    ast.push(0x09);
+                    ast.push(if has_arg { 1 } else { 0 });
+                }
+                NormalOp::GetLocal(index) => {
+                    ast.push(0x14);
+                    ast.push(index as u8);
+                }
+                _ => {}
+                // _ => panic!()
+            }
+        }
 
         FunctionBody {
             locals: locals,

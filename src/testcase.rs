@@ -2,9 +2,9 @@ use std::str;
 use std::collections::HashMap;
 
 use sexpr::Sexpr;
-use module::{AsBytes, Module, MemoryInfo, FunctionBuilder};
-use types::{Type, Dynamic};
-use ops::NormalOp;
+use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex};
+use types::{Type, Dynamic, IntType, FloatType};
+use ops::{NormalOp, IntBinOp};
 use interp::Instance;
 
 macro_rules! vec_form {
@@ -196,14 +196,13 @@ impl TestCase {
 
                                 let mut func = FunctionBuilder::new();
 
-                                let mut param_names = HashMap::new();
                                 let mut local_names = HashMap::new();
 
                                 while let Some(s) = it.next() {
                                     sexpr_match!(s;
                                         (param &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                param_names.insert(v, func.ty.param_types.len());
+                                                local_names.insert(v.as_str(), func.ty.param_types.len());
                                             } else {
                                                 panic!();
                                             }
@@ -222,7 +221,7 @@ impl TestCase {
                                         };
                                         (local &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                local_names.insert(v, func.local_types.len());
+                                                local_names.insert(v.as_str(), func.ty.param_types.len() + func.local_types.len());
                                             } else {
                                                 panic!();
                                             }
@@ -233,19 +232,33 @@ impl TestCase {
                                             }
                                         };
                                         _ => {
-                                            parse_op(s, &mut func.ops);
+                                            parse_op(s, &mut func.ops, &local_names);
                                         }
                                     );
                                 }
 
                                 if let Some(name) = name {
-                                    function_names.insert(name, m.functions.len());
+                                    function_names.insert(name.as_str(), m.functions.len());
                                 }
 
+                                m.functions.push(func.ty.clone());
                                 m.code.push(func.build());
                             };
                             (export &name &id) => {
-                                // println!("found export!");
+                                match id {
+                                    &Sexpr::Variable(ref id) => {
+                                        match name {
+                                            &Sexpr::String(ref name) => {
+                                                m.exports.push(Export {
+                                                    function_index: FunctionIndex(*function_names.get(id.as_str()).unwrap()),
+                                                    function_name: Vec::from(name.as_bytes())
+                                                });
+                                            }
+                                            _ => panic!()
+                                        }
+                                    }
+                                    _ => panic!()
+                                }
                             };
                             (import &module &name &ty) => {
                                 // println!("found import!");
@@ -325,16 +338,24 @@ impl TestCase {
     }
 }
 
-fn parse_ops(exprs: &[Sexpr], ops: &mut Vec<NormalOp>) -> usize {
+fn read_local(exprs: &[Sexpr], local_names: &HashMap<&str, usize>) -> usize {
+    assert!(exprs.len() == 1);
+    match &exprs[0] {
+        &Sexpr::Variable(ref name) => *local_names.get(name.as_str()).unwrap(),
+        _ => panic!()
+    }
+}
+
+fn parse_ops(exprs: &[Sexpr], ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usize>) -> usize {
     let mut num = 0;
     for s in exprs {
-        parse_op(s, ops);
+        parse_op(s, ops, local_names);
         num += 1;
     }
     num
 }
 
-fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>) {
+fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usize>) {
     sexpr_match!(s;
         (ident:&op *args) => {
             match op.as_str() {
@@ -348,7 +369,7 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>) {
                 // "brif" => NormalOp::Nop,
                 // "brtable" => NormalOp::Nop,
                 "return" => {
-                    let num = parse_ops(args, ops);
+                    let num = parse_ops(args, ops, local_names);
                     assert!(num == 0 || num == 1);
                     ops.push(NormalOp::Return{has_arg: num == 1});
                 }
@@ -359,9 +380,15 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>) {
                 "i64.const" => { ops.push(NormalOp::Nop); }
                 "f64.const" => { ops.push(NormalOp::Nop); }
                 "f32.const" => { ops.push(NormalOp::Nop); }
-                "get_local" => { ops.push(NormalOp::Nop); }
-                "set_local" => { ops.push(NormalOp::Nop); }
-                "tee_local" => { ops.push(NormalOp::Nop); }
+                "get_local" => {
+                    ops.push(NormalOp::GetLocal(read_local(args, local_names)));
+                }
+                "set_local" => {
+                    ops.push(NormalOp::SetLocal(read_local(args, local_names)));
+                }
+                "tee_local" => {
+                    ops.push(NormalOp::TeeLocal(read_local(args, local_names)));
+                }
                 "call" => { ops.push(NormalOp::Nop); }
                 "callindirect" => { ops.push(NormalOp::Nop); }
                 "callimport" => { ops.push(NormalOp::Nop); }
@@ -390,7 +417,10 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>) {
                 "f64.store" => { ops.push(NormalOp::Nop); }
                 "current_memory" => { ops.push(NormalOp::Nop); }
                 "grow_memory" => { ops.push(NormalOp::Nop); }
-                "i32.add" => { ops.push(NormalOp::Nop); }
+                "i32.add" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Add));
+                }
                 "i32.sub" => { ops.push(NormalOp::Nop); }
                 "i32.mul" => { ops.push(NormalOp::Nop); }
                 "i32.div_s" => { ops.push(NormalOp::Nop); }
