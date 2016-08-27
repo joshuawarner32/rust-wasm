@@ -1,11 +1,4 @@
-use std::fs::{self, File};
-use std::io::{Read, Write};
 use std::{str, mem, fmt};
-use std::cmp::min;
-use std::collections::{HashMap, BTreeSet};
-use std::path::Path;
-use std::ops::Deref;
-use std::num::Wrapping;
 
 use types::{Type, Pr};
 use reader::Reader;
@@ -18,12 +11,6 @@ struct Chunk<'a> {
 
 pub trait AsBytes {
     fn as_bytes(&self) -> &[u8];
-}
-
-impl AsBytes {
-    fn len(&self) -> usize {
-        self.as_bytes().len()
-    }
 }
 
 impl<'a> AsBytes for &'a [u8] {

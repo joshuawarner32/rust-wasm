@@ -2,9 +2,9 @@ use std::{mem, str};
 use std::num::Wrapping;
 
 use module::{Module, FunctionIndex, AsBytes};
-use types::{Type, Dynamic, IntType, FloatType};
+use types::{Type, Dynamic, Sign, Size, IntType, FloatType};
 use ops::{
-    BlockOp, Block, NormalOp, Sign, Size, MemImm,
+    BlockOp, Block, NormalOp, MemImm,
     IntBinOp, IntCmpOp, IntUnOp, FloatBinOp, FloatUnOp, FloatCmpOp};
 
 pub struct Memory(Vec<u8>);

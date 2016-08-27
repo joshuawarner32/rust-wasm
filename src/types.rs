@@ -21,6 +21,15 @@ impl Type {
     pub fn to_u8(&self) -> u8 {
         unsafe { mem::transmute(*self) }
     }
+
+    pub fn size(&self) -> Size {
+        match self {
+            &Type::Int32 => Size::I32,
+            &Type::Int64 => Size::I64,
+            &Type::Float32 => Size::I32,
+            &Type::Float64 => Size::I64,
+        }
+    }
 }
 
 impl fmt::Display for Type {
@@ -30,6 +39,40 @@ impl fmt::Display for Type {
             &Type::Int64 => write!(f, "i64"),
             &Type::Float32 => write!(f, "f32"),
             &Type::Float64 => write!(f, "f64"),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum Sign {
+    Signed,
+    Unsigned
+}
+
+impl Sign {
+    pub fn text(self) -> &'static str {
+        match self {
+            Sign::Signed => "s",
+            Sign::Unsigned => "u",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Size {
+    I8,
+    I16,
+    I32,
+    I64
+}
+
+impl Size {
+    pub fn to_int(self) -> usize {
+        match self {
+            Size::I8 => 8,
+            Size::I16 => 16,
+            Size::I32 => 32,
+            Size::I64 => 64,
         }
     }
 }
