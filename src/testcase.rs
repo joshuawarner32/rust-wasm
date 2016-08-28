@@ -759,26 +759,86 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                     assert_eq!(parse_ops(args, ops, local_names), 2);
                     ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ge));
                 }
-                "f64.add" => { ops.push(NormalOp::Nop); }
-                "f64.sub" => { ops.push(NormalOp::Nop); }
-                "f64.mul" => { ops.push(NormalOp::Nop); }
-                "f64.div" => { ops.push(NormalOp::Nop); }
-                "f64.min" => { ops.push(NormalOp::Nop); }
-                "f64.max" => { ops.push(NormalOp::Nop); }
-                "f64.abs" => { ops.push(NormalOp::Nop); }
-                "f64.neg" => { ops.push(NormalOp::Nop); }
-                "f64.copysign" => { ops.push(NormalOp::Nop); }
-                "f64.ceil" => { ops.push(NormalOp::Nop); }
-                "f64.floor" => { ops.push(NormalOp::Nop); }
-                "f64.trunc" => { ops.push(NormalOp::Nop); }
-                "f64.nearest" => { ops.push(NormalOp::Nop); }
-                "f64.sqrt" => { ops.push(NormalOp::Nop); }
-                "f64.eq" => { ops.push(NormalOp::Nop); }
-                "f64.ne" => { ops.push(NormalOp::Nop); }
-                "f64.lt" => { ops.push(NormalOp::Nop); }
-                "f64.le" => { ops.push(NormalOp::Nop); }
-                "f64.gt" => { ops.push(NormalOp::Nop); }
-                "f64.ge" => { ops.push(NormalOp::Nop); }
+                "f64.add" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Add));
+                }
+                "f64.sub" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Sub));
+                }
+                "f64.mul" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Mul));
+                }
+                "f64.div" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Div));
+                }
+                "f64.min" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Min));
+                }
+                "f64.max" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Max));
+                }
+                "f64.copysign" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Copysign));
+                }
+                "f64.abs" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Abs));
+                }
+                "f64.neg" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Neg));
+                }
+                "f64.ceil" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Ceil));
+                }
+                "f64.floor" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Floor));
+                }
+                "f64.trunc" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Trunc));
+                }
+                "f64.nearest" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Nearest));
+                }
+                "f64.sqrt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Sqrt));
+                }
+                "f64.eq" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Eq));
+                }
+                "f64.ne" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ne));
+                }
+                "f64.lt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Lt));
+                }
+                "f64.le" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Le));
+                }
+                "f64.gt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Gt));
+                }
+                "f64.ge" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge));
+                }
                 "i32.trunc_s/f32" => { ops.push(NormalOp::Nop); }
                 "i32.trunc_s/f64" => { ops.push(NormalOp::Nop); }
                 "i32.trunc_u/f32" => { ops.push(NormalOp::Nop); }
@@ -872,7 +932,7 @@ fn parse_hex_float(mut text: &str) -> f64 {
 
     match d {
         "0" => {
-            assert!(exp == 0);
+            // assert!(exp == 0);
             exp = -1023;
         }
         "1" => {}
