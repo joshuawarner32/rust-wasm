@@ -460,6 +460,22 @@ fn u64_from_i64(val: Wrapping<i64>) -> Wrapping<u64> {
     unsafe { mem::transmute(val) }
 }
 
+
+fn copysign_f32(a: f32, b: f32) -> f32 {
+    if (unsafe { mem::transmute::<f32, u32>(b) } & 0x8000_0000u32) == 0 {
+        a.abs()
+    } else {
+        (-a.abs())
+    }
+}
+fn copysign_f64(a: f64, b: f64) -> f64 {
+    if (unsafe { mem::transmute::<f64, u64>(b) } & 0x8000_0000_0000_0000u64) == 0 {
+        a.abs()
+    } else {
+        -a.abs()
+    }
+}
+
 fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> InterpResult {
     assert!(a.get_type() == ty.to_type());
     assert!(b.get_type() == ty.to_type());
@@ -628,16 +644,23 @@ fn interp_float_bin(ty: FloatType, op: FloatBinOp, a: Dynamic, b: Dynamic) -> Dy
     assert!(a.get_type() == ty.to_type());
     assert!(b.get_type() == ty.to_type());
 
-    let a = a.to_float();
-    let b = b.to_float();
+    let ao = a.to_float();
+    let bo = b.to_float();
 
     let res = match op {
-        FloatBinOp::Add => a + b,
-        FloatBinOp::Sub => a - b,
-        FloatBinOp::Mul => a * b,
-        FloatBinOp::Div => a / b,
-        FloatBinOp::Min => a.min(b),
-        FloatBinOp::Max => a.max(b),
+        FloatBinOp::Add => ao + bo,
+        FloatBinOp::Sub => ao - bo,
+        FloatBinOp::Mul => ao * bo,
+        FloatBinOp::Div => ao / bo,
+        FloatBinOp::Min => if ao.is_nan() { ao } else if bo.is_nan() { bo } else { ao.min(bo) },
+        FloatBinOp::Max => if ao.is_nan() { ao } else if bo.is_nan() { bo } else { ao.max(bo) },
+        FloatBinOp::Copysign => {
+            match (a, b) {
+                (Dynamic::Float32(a), Dynamic::Float32(b)) => copysign_f32(a, b) as f64,
+                (Dynamic::Float64(a), Dynamic::Float64(b)) => copysign_f64(a, b),
+                _ => panic!()
+            }
+        }
     };
 
     Dynamic::from_float(ty, res)
@@ -651,11 +674,21 @@ fn interp_float_un(ty: FloatType, op: FloatUnOp, a: Dynamic) -> Dynamic {
     let res = match op {
         FloatUnOp::Abs => a.abs(),
         FloatUnOp::Neg => -a,
-        FloatUnOp::Copysign => a.signum(),
         FloatUnOp::Ceil => a.ceil(),
         FloatUnOp::Floor => a.floor(),
         FloatUnOp::Trunc => a.trunc(),
-        FloatUnOp::Nearest => a.round(),
+        FloatUnOp::Nearest => {
+            let b = a.floor();
+            if (a - b).abs() == 0.5f64 {
+                if (b as u64) & 1 == 0 {
+                    b
+                } else {
+                    b + 1f64
+                }
+            } else {
+                a.round()
+            }
+        }
         FloatUnOp::Sqrt => a.sqrt(),
     };
 

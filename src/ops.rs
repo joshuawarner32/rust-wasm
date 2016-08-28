@@ -243,13 +243,13 @@ pub enum FloatBinOp {
     Div,
     Min,
     Max,
+    Copysign,
 }
 
 #[derive(Copy, Clone)]
 pub enum FloatUnOp {
     Abs,
     Neg,
-    Copysign,
     Ceil,
     Floor,
     Trunc,
@@ -421,13 +421,13 @@ impl<'a> fmt::Display for NormalOp<'a> {
                     FloatBinOp::Div => write!(f, "{}.div", ty),
                     FloatBinOp::Min => write!(f, "{}.min", ty),
                     FloatBinOp::Max => write!(f, "{}.max", ty),
+                    FloatBinOp::Copysign => write!(f, "{}.copysign", ty),
                 }
             }
             &NormalOp::FloatUn(ty, op) => {
                 match op {
                     FloatUnOp::Abs => write!(f, "{}.abs", ty),
                     FloatUnOp::Neg => write!(f, "{}.neg", ty),
-                    FloatUnOp::Copysign => write!(f, "{}.copysign", ty),
                     FloatUnOp::Ceil => write!(f, "{}.ceil", ty),
                     FloatUnOp::Floor => write!(f, "{}.floor", ty),
                     FloatUnOp::Trunc => write!(f, "{}.trunc", ty),
@@ -712,9 +712,9 @@ fn read_linear_op<'a>(r: &mut Reader<'a>) -> Option<LinearOp<'a>> {
                 0x78 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Div),
                 0x79 => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Min),
                 0x7a => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Max),
+                0x7d => NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Copysign),
                 0x7b => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Abs),
                 0x7c => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Neg),
-                0x7d => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Copysign),
                 0x7e => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Ceil),
                 0x7f => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Floor),
                 0x80 => NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Trunc),
@@ -732,9 +732,9 @@ fn read_linear_op<'a>(r: &mut Reader<'a>) -> Option<LinearOp<'a>> {
                 0x8c => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Div),
                 0x8d => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Min),
                 0x8e => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Max),
+                0x91 => NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Copysign),
                 0x8f => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Abs),
                 0x90 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Neg),
-                0x91 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Copysign),
                 0x92 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Ceil),
                 0x93 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Floor),
                 0x94 => NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Trunc),

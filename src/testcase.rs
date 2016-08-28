@@ -1,10 +1,12 @@
-use std::str;
+use std::str::{self, FromStr};
+use std::{mem, f64, fmt};
 use std::collections::HashMap;
+use std::num::Wrapping;
 
 use sexpr::Sexpr;
 use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex};
 use types::{Type, Dynamic, IntType, FloatType};
-use ops::{NormalOp, IntBinOp, IntUnOp, IntCmpOp};
+use ops::{NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp};
 use interp::{Instance, InterpResult};
 
 macro_rules! vec_form {
@@ -90,6 +92,16 @@ pub struct Invoke {
     arguments: Vec<Dynamic>,
 }
 
+impl fmt::Display for Invoke {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        try!(write!(f, "{}(", self.function_name));
+        for (i, a) in self.arguments.iter().enumerate() {
+            try!(write!(f, "{}{}", if i == 0 { "" } else { ", " }, a));
+        }
+        write!(f, ")")
+    }
+}
+
 impl Invoke {
     fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) -> InterpResult {
         let func = instance.module.find(self.function_name.as_bytes()).unwrap();
@@ -99,6 +111,7 @@ impl Invoke {
 
 pub enum Assert {
     Return(Invoke, Dynamic),
+    ReturnNan(Invoke),
     Trap(Invoke)
 }
 
@@ -106,9 +119,34 @@ impl Assert {
     fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) {
         match self {
             &Assert::Return(ref invoke, result) => {
-                assert_eq!(invoke.run(instance), InterpResult::Value(Some(result)));
+                println!("testing {} => {}", invoke, result);
+                let a = invoke.run(instance);
+                match (a, result) {
+                    (InterpResult::Value(Some(Dynamic::Int32(a))), Dynamic::Int32(b)) => assert_eq!(a, b),
+                    (InterpResult::Value(Some(Dynamic::Int64(a))), Dynamic::Int64(b)) => assert_eq!(a, b),
+                    (InterpResult::Value(Some(Dynamic::Float32(a))), Dynamic::Float32(b)) => {
+                        println!("{} {}", a, b);
+                        assert!(a == b ||
+                            (a.is_nan() && b.is_nan() && a.is_sign_negative() == b.is_sign_negative()));
+                    }
+                    (InterpResult::Value(Some(Dynamic::Float64(a))), Dynamic::Float64(b)) => {
+                        println!("{} {}", a, b);
+                        assert!(a == b ||
+                            (a.is_nan() && b.is_nan() && a.is_sign_negative() == b.is_sign_negative()));
+                    }
+                    _ => panic!()
+                }
+            }
+            &Assert::ReturnNan(ref invoke) => {
+                println!("testing {} returns nan", invoke);
+                match invoke.run(instance) {
+                    InterpResult::Value(Some(Dynamic::Float32(v))) => assert!(v.is_nan()),
+                    InterpResult::Value(Some(Dynamic::Float64(v))) => assert!(v.is_nan()),
+                    _ => panic!()
+                }
             }
             &Assert::Trap(ref invoke) => {
+                println!("testing {} traps", invoke);
                 assert_eq!(invoke.run(instance), InterpResult::Trap);
             }
         }
@@ -150,12 +188,8 @@ fn parse_const(s: &Sexpr) -> Dynamic {
             return match ty.as_str() {
                 "i32.const" => parse_int(value, IntType::Int32),
                 "i64.const" => parse_int(value, IntType::Int64),
-                // &Sexpr::Identifier("f32.const") => {
-                //     Dynamic::from_f32(parse_int(it[1]))
-                // }
-                // &Sexpr::Identifier("f64.const") => {
-                //     Dynamic::from_f64(parse_int(it[1]))
-                // }
+                "f32.const" => parse_float(value, FloatType::Float32),
+                "f64.const" => parse_float(value, FloatType::Float64),
                 _ => panic!()
             };
         };
@@ -200,31 +234,31 @@ impl TestCase {
                                             if let &Sexpr::Variable(ref v) = id {
                                                 local_names.insert(v.as_str(), func.ty.param_types.len());
                                             } else {
-                                                panic!();
+                                                panic!("1");
                                             }
                                             if let &Sexpr::Identifier(ref v) = ty {
                                                 func.ty.param_types.push(parse_type(v.as_str()).to_u8());
                                             } else {
-                                                panic!();
+                                                panic!("2");
                                             }
                                         };
                                         (result &ty) => {
                                             if let &Sexpr::Identifier(ref v) = ty {
                                                 func.ty.return_type = Some(parse_type(v.as_str()));
                                             } else {
-                                                panic!();
+                                                panic!("3");
                                             }
                                         };
                                         (local &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
                                                 local_names.insert(v.as_str(), func.ty.param_types.len() + func.local_types.len());
                                             } else {
-                                                panic!();
+                                                panic!("4");
                                             }
                                             if let &Sexpr::Identifier(ref v) = ty {
                                                 func.local_types.push(parse_type(v.as_str()));
                                             } else {
-                                                panic!();
+                                                panic!("5");
                                             }
                                         };
                                         _ => {
@@ -250,10 +284,10 @@ impl TestCase {
                                                     function_name: Vec::from(name.as_bytes())
                                                 });
                                             }
-                                            _ => panic!()
+                                            _ => panic!("6")
                                         }
                                     }
-                                    _ => panic!()
+                                    _ => panic!("7")
                                 }
                             };
                             (import &module &name &ty) => {
@@ -300,19 +334,19 @@ impl TestCase {
                     module = Some(m)
                 };
                 (assert_invalid &module &text) => {
-                    panic!();
+                    panic!("8");
                 };
                 (assert_return &invoke &result) => {
                     asserts.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
                 };
                 (assert_return_nan &invoke) => {
-                    panic!();
+                    asserts.push(Assert::ReturnNan(parse_invoke(invoke)));
                 };
                 (assert_trap &invoke &text) => {
                     asserts.push(Assert::Trap(parse_invoke(invoke)));
                 };
                 (invoke &ident *args) => {
-                    panic!();
+                    panic!("10");
                 };
                 _ => {
                     panic!("unhandled: {}", s);
@@ -645,26 +679,86 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                     assert_eq!(parse_ops(args, ops, local_names), 1);
                     ops.push(NormalOp::IntEqz(IntType::Int64));
                 }
-                "f32.add" => { ops.push(NormalOp::Nop); }
-                "f32.sub" => { ops.push(NormalOp::Nop); }
-                "f32.mul" => { ops.push(NormalOp::Nop); }
-                "f32.div" => { ops.push(NormalOp::Nop); }
-                "f32.min" => { ops.push(NormalOp::Nop); }
-                "f32.max" => { ops.push(NormalOp::Nop); }
-                "f32.abs" => { ops.push(NormalOp::Nop); }
-                "f32.neg" => { ops.push(NormalOp::Nop); }
-                "f32.copysign" => { ops.push(NormalOp::Nop); }
-                "f32.ceil" => { ops.push(NormalOp::Nop); }
-                "f32.floor" => { ops.push(NormalOp::Nop); }
-                "f32.trunc" => { ops.push(NormalOp::Nop); }
-                "f32.nearest" => { ops.push(NormalOp::Nop); }
-                "f32.sqrt" => { ops.push(NormalOp::Nop); }
-                "f32.eq" => { ops.push(NormalOp::Nop); }
-                "f32.ne" => { ops.push(NormalOp::Nop); }
-                "f32.lt" => { ops.push(NormalOp::Nop); }
-                "f32.le" => { ops.push(NormalOp::Nop); }
-                "f32.gt" => { ops.push(NormalOp::Nop); }
-                "f32.ge" => { ops.push(NormalOp::Nop); }
+                "f32.add" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Add));
+                }
+                "f32.sub" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Sub));
+                }
+                "f32.mul" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Mul));
+                }
+                "f32.div" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Div));
+                }
+                "f32.min" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Min));
+                }
+                "f32.max" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Max));
+                }
+                "f32.copysign" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Copysign));
+                }
+                "f32.abs" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Abs));
+                }
+                "f32.neg" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Neg));
+                }
+                "f32.ceil" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Ceil));
+                }
+                "f32.floor" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Floor));
+                }
+                "f32.trunc" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Trunc));
+                }
+                "f32.nearest" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Nearest));
+                }
+                "f32.sqrt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Sqrt));
+                }
+                "f32.eq" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Eq));
+                }
+                "f32.ne" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ne));
+                }
+                "f32.lt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Lt));
+                }
+                "f32.le" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Le));
+                }
+                "f32.gt" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Gt));
+                }
+                "f32.ge" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 2);
+                    ops.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ge));
+                }
                 "f64.add" => { ops.push(NormalOp::Nop); }
                 "f64.sub" => { ops.push(NormalOp::Nop); }
                 "f64.mul" => { ops.push(NormalOp::Nop); }
@@ -739,6 +833,93 @@ fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
                         Dynamic::from_u64(u64::from_str_radix(text, 10).unwrap())
                     }
                 }
+            }
+        }
+        _ => panic!("expected number id: {}", node)
+    }
+}
+
+fn parse_hex_digit(ch: char) -> usize {
+    match ch {
+        '0'...'9' => (ch as usize) - ('0' as usize),
+        'a'...'f' => (ch as usize) - ('a' as usize) + 10,
+        'A'...'F' => (ch as usize) - ('A' as usize) + 10,
+        _ => panic!(),
+    }
+}
+
+fn parse_hex_float(mut text: &str) -> f64 {
+    println!("parsing {}", text);
+
+    assert!(text.starts_with("0x"));
+    let text = &text[2..];
+
+    let (d, f, e) = match text.find(|c| c == '.') {
+        None => match text.find(|c| c == 'p') {
+            None => (text, "", ""),
+            Some(pindex) => (&text[..pindex], "", &text[pindex + 1..]),
+        },
+        Some(dindex) => match text[dindex + 1..].find(|c| c == 'p') {
+            None => (&text[..dindex], &text[dindex + 1..], ""),
+            Some(pindex) => (&text[..dindex], &text[dindex + 1..dindex + pindex + 1], &text[dindex + pindex + 2..]),
+        }
+    };
+
+    println!("d [{}] f [{}] e [{}]", d, f, e);
+
+    let mut exp = if e.len() > 0 { i32::from_str(e).unwrap() } else { 0 };
+    assert!(exp >= -1022 && exp <= 1023);
+
+    match d {
+        "0" => {
+            assert!(exp == 0);
+            exp = -1023;
+        }
+        "1" => {}
+        _ => panic!()
+    }
+
+    let mut bits = 0u64;
+
+    bits |= ((exp + 1023) as u64) << 52;
+    let mut shift = 52 - 4;
+    for ch in f.chars() {
+        bits |= (parse_hex_digit(ch) as u64) << shift;
+        shift -= 4;
+    }
+    unsafe { mem::transmute(bits) }
+}
+
+fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
+    match node {
+        &Sexpr::Identifier(ref text) => {
+            println!("parsing {}", text);
+
+            let mut text = text.as_str();
+            let neg = if text.starts_with("-") {
+                text = &text[1..];
+                true
+            } else {
+                false
+            };
+
+            let mut res = if text.starts_with("0x") {
+                parse_hex_float(text)
+            } else if text == "infinity" {
+                f64::INFINITY
+            } else if text == "nan" {
+                f64::NAN
+            } else {
+                f64::from_str(text).unwrap()
+            };
+
+            if neg {
+                res = -res;
+            }
+
+            match ty {
+                FloatType::Float32 => Dynamic::Float32(res as f32),
+                FloatType::Float64 => Dynamic::Float64(res),
             }
         }
         _ => panic!("expected number id: {}", node)
