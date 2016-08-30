@@ -453,7 +453,9 @@ impl<B: AsBytes> Module<B> {
     }
 
     pub fn find(&self, name: &[u8]) -> Option<FunctionIndex> {
+        println!("looking for {}", str::from_utf8(name).unwrap());
         for e in &self.exports {
+            println!("checking {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
             if e.function_name.as_bytes() == name {
                 return Some(e.function_index);
             }
@@ -462,9 +464,9 @@ impl<B: AsBytes> Module<B> {
     }
 
     pub fn find_by_debug_name(&self, name: &[u8]) -> Option<FunctionIndex> {
-        println!("looking for {}", str::from_utf8(name).unwrap());
+        println!("looking for debug {}", str::from_utf8(name).unwrap());
         for (i, e) in self.names.iter().enumerate() {
-            println!("checking {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
+            println!("checking debug {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
             if e.function_name.as_bytes() == name {
                 return Some(FunctionIndex(i));
             }

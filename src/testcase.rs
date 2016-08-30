@@ -157,8 +157,7 @@ impl Assert {
 }
 
 pub struct TestCase {
-    module: Module<Vec<u8>>,
-    asserts: Vec<Assert>
+    modules: Vec<(Module<Vec<u8>>, Vec<Assert>)>
 }
 
 fn parse_type(text: &str) -> Type {
@@ -206,8 +205,7 @@ impl TestCase {
         let text = str::from_utf8(bytes).unwrap();
         let exprs = Sexpr::parse(text);
 
-        let mut asserts = Vec::new();
-        let mut module = None;
+        let mut modules = Vec::new();
 
         for s in &exprs {
             sexpr_match!(s;
@@ -255,10 +253,10 @@ impl TestCase {
                                 if let Some(name) = name {
                                     function_names.insert(name.as_str(), function_index);
                                 }
+                                function_index += 1;
                             };
                             _ => {}
                         );
-                        function_index += 1;
                     }
 
                     for s in it {
@@ -391,20 +389,20 @@ impl TestCase {
                             }
                         );
                     }
-                    module = Some(m)
+                    modules.push((m, Vec::new()));
                 };
                 (assert_invalid &module &text) => {
                     // TODO
                     // panic!("8");
                 };
                 (assert_return &invoke &result) => {
-                    asserts.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
+                    modules.last_mut().unwrap().1.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
                 };
                 (assert_return_nan &invoke) => {
-                    asserts.push(Assert::ReturnNan(parse_invoke(invoke)));
+                    modules.last_mut().unwrap().1.push(Assert::ReturnNan(parse_invoke(invoke)));
                 };
                 (assert_trap &invoke &text) => {
-                    asserts.push(Assert::Trap(parse_invoke(invoke)));
+                    modules.last_mut().unwrap().1.push(Assert::Trap(parse_invoke(invoke)));
                 };
                 (invoke &ident *args) => {
                     panic!("10");
@@ -416,15 +414,16 @@ impl TestCase {
         }
 
         TestCase {
-            module: module.unwrap(),
-            asserts: asserts
+            modules: modules
         }
     }
 
     pub fn run_all(&self) {
-        let mut instance = Instance::new(&self.module);
-        for assert in &self.asserts {
-            assert.run(&mut instance);
+        for m in &self.modules {
+            let mut instance = Instance::new(&m.0);
+            for assert in &m.1 {
+                assert.run(&mut instance);
+            }
         }
     }
 }
@@ -1054,9 +1053,12 @@ impl<'a> FunctionContext<'a> {
 fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
+            println!("parsing int {}", text);
             match ty {
                 IntType::Int32 => {
-                    if text.starts_with("-") {
+                    if text.starts_with("-0x") {
+                        Dynamic::Int32(!Wrapping(u32::from_str_radix(&text[3..], 16).unwrap()) + Wrapping(1))
+                    } else if text.starts_with("-") {
                         Dynamic::from_i32(i32::from_str_radix(text, 10).unwrap())
                     } else if text.starts_with("0x") {
                         Dynamic::from_u32(u32::from_str_radix(&text[2..], 16).unwrap())
@@ -1065,7 +1067,9 @@ fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
                     }
                 }
                 IntType::Int64 => {
-                    if text.starts_with("-") {
+                    if text.starts_with("-0x") {
+                        Dynamic::Int64(!Wrapping(u64::from_str_radix(&text[3..], 16).unwrap()) + Wrapping(1))
+                    } else if text.starts_with("-") {
                         Dynamic::from_i64(i64::from_str_radix(text, 10).unwrap())
                     } else if text.starts_with("0x") {
                         Dynamic::from_u64(u64::from_str_radix(&text[2..], 16).unwrap())

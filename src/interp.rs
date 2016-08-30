@@ -753,7 +753,7 @@ fn interp_int_extend(sign: Sign, a: Dynamic) -> Dynamic {
 
     Dynamic::Int64(match sign {
         Sign::Signed => u64_from_i64(Wrapping(a.to_i32() as i64)),
-        Sign::Unsigned => a.to_wu64()
+        Sign::Unsigned => a.to_int()
     })
 }
 
