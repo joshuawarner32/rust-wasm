@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::num::Wrapping;
 
 use sexpr::Sexpr;
-use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex};
-use types::{Type, Dynamic, IntType, FloatType};
+use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex, Names};
+use types::{Type, Dynamic, IntType, FloatType, Sign};
 use ops::{NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp};
 use interp::{Instance, InterpResult};
 
@@ -104,7 +104,10 @@ impl fmt::Display for Invoke {
 
 impl Invoke {
     fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) -> InterpResult {
-        let func = instance.module.find(self.function_name.as_bytes()).unwrap();
+        let func =
+            instance.module.find(self.function_name.as_bytes())
+            .or_else(|| instance.module.find_by_debug_name(self.function_name.as_bytes()))
+            .unwrap();
         instance.invoke(func, &self.arguments)
     }
 }
@@ -134,7 +137,7 @@ impl Assert {
                         assert!(a == b ||
                             (a.is_nan() && b.is_nan() && a.is_sign_negative() == b.is_sign_negative()));
                     }
-                    _ => panic!()
+                    _ => panic!("no match: {:?} vs {:}", a, result)
                 }
             }
             &Assert::ReturnNan(ref invoke) => {
@@ -218,17 +221,26 @@ impl TestCase {
                             (func *it) => {
                                 let mut it = it.iter();
 
-                                let name = if let Some(&Sexpr::Variable(ref v)) = it.next() {
-                                    Some(v)
-                                } else {
-                                    None
-                                };
+                                let mut name = None;
+
+                                let mut text = None;
 
                                 let mut func = FunctionBuilder::new();
 
                                 let mut local_names = HashMap::new();
 
                                 while let Some(s) = it.next() {
+                                    match s {
+                                        &Sexpr::Variable(ref v) => {
+                                            name = Some(v);
+                                            continue;
+                                        }
+                                        &Sexpr::String(ref v) => {
+                                            text = Some(v);
+                                            continue;
+                                        }
+                                        _ => {}
+                                    }
                                     sexpr_match!(s;
                                         (param &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
@@ -240,6 +252,15 @@ impl TestCase {
                                                 func.ty.param_types.push(parse_type(v.as_str()).to_u8());
                                             } else {
                                                 panic!("2");
+                                            }
+                                        };
+                                        (param *args) => {
+                                            for ty in args {
+                                                if let &Sexpr::Identifier(ref v) = ty {
+                                                    func.ty.param_types.push(parse_type(v.as_str()).to_u8());
+                                                } else {
+                                                    panic!("2");
+                                                }
                                             }
                                         };
                                         (result &ty) => {
@@ -261,6 +282,16 @@ impl TestCase {
                                                 panic!("5");
                                             }
                                         };
+                                        (local *args) => {
+                                            for ty in args {
+                                                println!("gotit {:?}", text);
+                                                if let &Sexpr::Identifier(ref v) = ty {
+                                                    func.local_types.push(parse_type(v.as_str()));
+                                                } else {
+                                                    panic!("6");
+                                                }
+                                            }
+                                        };
                                         _ => {
                                             parse_op(s, &mut func.ops, &local_names);
                                         }
@@ -269,6 +300,18 @@ impl TestCase {
 
                                 if let Some(name) = name {
                                     function_names.insert(name.as_str(), m.functions.len());
+                                }
+
+                                if let Some(text) = text {
+                                    m.names.push(Names {
+                                        function_name: Vec::from(text.as_bytes()),
+                                        local_names: Vec::new(),
+                                    });
+                                } else {
+                                    m.names.push(Names {
+                                        function_name: Vec::new(),
+                                        local_names: Vec::new(),
+                                    });
                                 }
 
                                 m.functions.push(func.ty.clone());
@@ -334,7 +377,8 @@ impl TestCase {
                     module = Some(m)
                 };
                 (assert_invalid &module &text) => {
-                    panic!("8");
+                    // TODO
+                    // panic!("8");
                 };
                 (assert_return &invoke &result) => {
                     asserts.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
@@ -368,11 +412,11 @@ impl TestCase {
     }
 }
 
-fn read_local(exprs: &[Sexpr], local_names: &HashMap<&str, usize>) -> usize {
-    assert!(exprs.len() == 1);
-    match &exprs[0] {
+fn read_local(expr: &Sexpr, local_names: &HashMap<&str, usize>) -> usize {
+    match expr {
         &Sexpr::Variable(ref name) => *local_names.get(name.as_str()).unwrap(),
-        _ => panic!()
+        &Sexpr::Identifier(ref num) => usize::from_str(num).unwrap(),
+        _ => panic!("no local named {}", expr)
     }
 }
 
@@ -406,18 +450,25 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                 "unreachable" => { ops.push(NormalOp::Nop); }
                 "drop" => { ops.push(NormalOp::Nop); }
                 "end" => { ops.push(NormalOp::Nop); }
-                "i32.const" => { ops.push(NormalOp::Nop); }
-                "i64.const" => { ops.push(NormalOp::Nop); }
-                "f64.const" => { ops.push(NormalOp::Nop); }
-                "f32.const" => { ops.push(NormalOp::Nop); }
+                "i32.const" |
+                "i64.const" |
+                "f64.const" |
+                "f32.const" => {
+                    ops.push(NormalOp::Const(parse_const(s)));
+                }
                 "get_local" => {
-                    ops.push(NormalOp::GetLocal(read_local(args, local_names)));
+                    assert_eq!(args.len(), 1);
+                    ops.push(NormalOp::GetLocal(read_local(&args[0], local_names)));
                 }
                 "set_local" => {
-                    ops.push(NormalOp::SetLocal(read_local(args, local_names)));
+                    assert_eq!(parse_ops(&args[1..], ops, local_names), 1);
+                    assert_eq!(args.len(), 2);
+                    ops.push(NormalOp::SetLocal(read_local(&args[0], local_names)));
                 }
                 "tee_local" => {
-                    ops.push(NormalOp::TeeLocal(read_local(args, local_names)));
+                    assert_eq!(parse_ops(&args[1..], ops, local_names), 1);
+                    assert_eq!(args.len(), 2);
+                    ops.push(NormalOp::TeeLocal(read_local(&args[0], local_names)));
                 }
                 "call" => { ops.push(NormalOp::Nop); }
                 "callindirect" => { ops.push(NormalOp::Nop); }
@@ -839,31 +890,106 @@ fn parse_op(s: &Sexpr, ops: &mut Vec<NormalOp>, local_names: &HashMap<&str, usiz
                     assert_eq!(parse_ops(args, ops, local_names), 2);
                     ops.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge));
                 }
-                "i32.trunc_s/f32" => { ops.push(NormalOp::Nop); }
-                "i32.trunc_s/f64" => { ops.push(NormalOp::Nop); }
-                "i32.trunc_u/f32" => { ops.push(NormalOp::Nop); }
-                "i32.trunc_u/f64" => { ops.push(NormalOp::Nop); }
-                "i32.wrap/i64" => { ops.push(NormalOp::Nop); }
-                "i64.trunc_s/f32" => { ops.push(NormalOp::Nop); }
-                "i64.trunc_s/f64" => { ops.push(NormalOp::Nop); }
-                "i64.trunc_u/f32" => { ops.push(NormalOp::Nop); }
-                "i64.trunc_u/f64" => { ops.push(NormalOp::Nop); }
-                "i64.extend_s/i32" => { ops.push(NormalOp::Nop); }
-                "i64.extend_u/i32" => { ops.push(NormalOp::Nop); }
-                "f32.convert_s/i32" => { ops.push(NormalOp::Nop); }
-                "f32.convert_u/i32" => { ops.push(NormalOp::Nop); }
-                "f32.convert_s/i64" => { ops.push(NormalOp::Nop); }
-                "f32.convert_u/i64" => { ops.push(NormalOp::Nop); }
-                "f32.demote/f64" => { ops.push(NormalOp::Nop); }
-                "f32.reinterpret/i32" => { ops.push(NormalOp::Nop); }
-                "f64.convert_s/i32" => { ops.push(NormalOp::Nop); }
-                "f64.convert_u/i32" => { ops.push(NormalOp::Nop); }
-                "f64.convert_s/i64" => { ops.push(NormalOp::Nop); }
-                "f64.convert_u/i64" => { ops.push(NormalOp::Nop); }
-                "f64.promote/f32" => { ops.push(NormalOp::Nop); }
-                "f64.reinterpret/i64" => { ops.push(NormalOp::Nop); }
-                "i32.reinterpret/f32" => { ops.push(NormalOp::Nop); }
-                "i64.reinterpret/f64" => { ops.push(NormalOp::Nop); }
+                "i32.trunc_s/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Signed));
+                }
+                "i32.trunc_s/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Signed));
+                }
+                "i32.trunc_u/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Unsigned));
+                }
+                "i32.trunc_u/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Unsigned));
+                }
+                "i32.wrap/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntTruncate);
+                }
+                "i64.trunc_s/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Signed));
+                }
+                "i64.trunc_s/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Signed));
+                }
+                "i64.trunc_u/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Unsigned));
+                }
+                "i64.trunc_u/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Unsigned));
+                }
+                "i64.extend_s/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntExtend(Sign::Signed));
+                }
+                "i64.extend_u/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntExtend(Sign::Unsigned));
+                }
+                "f32.convert_s/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float32));
+                }
+                "f32.convert_u/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float32));
+                }
+                "f32.convert_s/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float32));
+                }
+                "f32.convert_u/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float32));
+                }
+                "f32.demote/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatConvert(FloatType::Float32));
+                }
+                "f32.reinterpret/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::Reinterpret(Type::Int32, Type::Float32));
+                }
+                "f64.convert_s/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float64));
+                }
+                "f64.convert_u/i32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float64));
+                }
+                "f64.convert_s/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float64));
+                }
+                "f64.convert_u/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float64));
+                }
+                "f64.promote/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::FloatConvert(FloatType::Float64));
+                }
+                "f64.reinterpret/i64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::Reinterpret(Type::Float64, Type::Int64));
+                }
+                "i32.reinterpret/f32" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::Reinterpret(Type::Float32, Type::Int32));
+                }
+                "i64.reinterpret/f64" => {
+                    assert_eq!(parse_ops(args, ops, local_names), 1);
+                    ops.push(NormalOp::Reinterpret(Type::Float64, Type::Int64));
+                }
                 _ => panic!("unexpected instr: {}", op)
             };
         };

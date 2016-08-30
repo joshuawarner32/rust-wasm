@@ -30,6 +30,15 @@ impl Type {
             &Type::Float64 => Size::I64,
         }
     }
+
+    pub fn zero(&self) -> Dynamic {
+        match self {
+            &Type::Int32 => Dynamic::Int32(Wrapping(0)),
+            &Type::Int64 => Dynamic::Int64(Wrapping(0)),
+            &Type::Float32 => Dynamic::Float32(0f32),
+            &Type::Float64 => Dynamic::Float64(0f64),
+        }
+    }
 }
 
 impl fmt::Display for Type {

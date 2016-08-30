@@ -119,7 +119,7 @@ fn read_u32(data: &[u8]) -> u32 {
     ((data[3] as u32) << 3*8)
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum InterpResult {
     Value(Option<Dynamic>),
     Trap,
@@ -159,8 +159,14 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         let local_count: usize = f.locals.iter().map(|e|e.1).fold(0, |a, b|a+b);
         let mut locals = Vec::with_capacity(args.len() + local_count);
-        locals.resize(args.len() + local_count, Dynamic::from_u32(0));
-        locals[..args.len()].copy_from_slice(args);
+        locals.extend(args);
+        for &(ty, count) in &f.locals {
+            for _ in 0..count {
+                locals.push(ty.zero());
+            }
+        }
+
+        println!("locals: {}", locals.len());
 
         struct Context<'b, 'a: 'b, B: AsBytes + 'a> {
             instance: &'b mut Instance<'a, B>,
@@ -168,6 +174,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             stack: Vec<Dynamic>,
         }
 
+        #[derive(Debug)]
         enum Res {
             Value(Option<Dynamic>),
             Branch(u32, Option<Dynamic>),
@@ -204,7 +211,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         fn run_instr<'a, B: AsBytes>(context: &'a mut Context<B>, op: &BlockOp) -> Res {
             println!("run {}", op);
-            match op {
+            let res = match op {
                 &BlockOp::Block(Block::Block(ref ops)) => match run_block(context, ops) {
                     Res::Branch(0, val) => Res::Value(val),
                     Res::Branch(n, val) => Res::Branch(n - 1, val),
@@ -291,7 +298,9 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         Res::Value(Some(val))
                     }
                     &NormalOp::GetLocal(local) => {
-                        Res::Value(Some(context.locals[local as usize]))
+                        let val = context.locals[local as usize];
+                        println!("val {}", val);
+                        Res::Value(Some(val))
                     }
                     &NormalOp::SetLocal(local) => {
                         let val = context.stack.pop().unwrap();
@@ -423,7 +432,9 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         Res::Value(Some(interp_reinterpret(type_from, type_to, a)))
                     }
                 }
-            }
+            };
+            println!("res {} -> {:?}", op, res);
+            res
         };
 
         let mut context = Context {
@@ -477,8 +488,8 @@ fn copysign_f64(a: f64, b: f64) -> f64 {
 }
 
 fn interp_int_bin(ty: IntType, op: IntBinOp, a: Dynamic, b: Dynamic) -> InterpResult {
-    assert!(a.get_type() == ty.to_type());
-    assert!(b.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
+    assert_eq!(b.get_type(), ty.to_type());
 
     let a = a.to_int();
     let b = b.to_int();
@@ -590,8 +601,8 @@ fn extend_signed(val: Wrapping<u64>, ty: IntType) -> Wrapping<i64> {
 }
 
 fn interp_int_cmp(ty: IntType, op: IntCmpOp, a: Dynamic, b: Dynamic) -> Dynamic {
-    assert!(a.get_type() == ty.to_type());
-    assert!(b.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
+    assert_eq!(b.get_type(), ty.to_type());
 
     let a = a.to_int();
     let b = b.to_int();
@@ -633,7 +644,7 @@ fn interp_int_un(ty: IntType, op: IntUnOp, a: Dynamic) -> Dynamic {
 }
 
 fn interp_int_eqz(ty: IntType, a: Dynamic) -> Dynamic {
-    assert!(a.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
 
     let a = a.to_int();
 
@@ -641,8 +652,8 @@ fn interp_int_eqz(ty: IntType, a: Dynamic) -> Dynamic {
 }
 
 fn interp_float_bin(ty: FloatType, op: FloatBinOp, a: Dynamic, b: Dynamic) -> Dynamic {
-    assert!(a.get_type() == ty.to_type());
-    assert!(b.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
+    assert_eq!(b.get_type(), ty.to_type());
 
     let ao = a.to_float();
     let bo = b.to_float();
@@ -667,7 +678,7 @@ fn interp_float_bin(ty: FloatType, op: FloatBinOp, a: Dynamic, b: Dynamic) -> Dy
 }
 
 fn interp_float_un(ty: FloatType, op: FloatUnOp, a: Dynamic) -> Dynamic {
-    assert!(a.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
 
     let a = a.to_float();
 
@@ -696,8 +707,8 @@ fn interp_float_un(ty: FloatType, op: FloatUnOp, a: Dynamic) -> Dynamic {
 }
 
 fn interp_float_cmp(ty: FloatType, op: FloatCmpOp, a: Dynamic, b: Dynamic) -> Dynamic {
-    assert!(a.get_type() == ty.to_type());
-    assert!(b.get_type() == ty.to_type());
+    assert_eq!(a.get_type(), ty.to_type());
+    assert_eq!(b.get_type(), ty.to_type());
 
     let a = a.to_float();
     let b = b.to_float();
@@ -713,7 +724,7 @@ fn interp_float_cmp(ty: FloatType, op: FloatCmpOp, a: Dynamic, b: Dynamic) -> Dy
 }
 
 fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dynamic) -> Dynamic {
-    assert!(a.get_type() == floattype.to_type());
+    assert_eq!(a.get_type(), floattype.to_type());
 
     let a = a.to_float();
 
@@ -726,7 +737,7 @@ fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dy
 }
 
 fn interp_int_extend(sign: Sign, a: Dynamic) -> Dynamic {
-    assert!(a.get_type() == Type::Int32);
+    assert_eq!(a.get_type(), Type::Int32);
 
     Dynamic::Int64(match sign {
         Sign::Signed => u64_from_i64(Wrapping(a.to_i32() as i64)),
@@ -739,7 +750,7 @@ fn interp_int_truncate(a: Dynamic) -> Dynamic {
 }
 
 fn interp_int_to_float(inttype: IntType, sign: Sign, floattype: FloatType, a: Dynamic) -> Dynamic {
-    assert!(a.get_type() == inttype.to_type());
+    assert_eq!(a.get_type(), inttype.to_type());
 
     let a = a.to_int();
 
@@ -756,7 +767,7 @@ fn interp_float_convert(ty: FloatType, a: Dynamic) -> Dynamic {
 }
 
 fn interp_reinterpret(type_from: Type, type_to: Type, a: Dynamic) -> Dynamic {
-    assert!(type_from == a.get_type());
+    assert_eq!(type_from, a.get_type());
 
     let res = match a {
         Dynamic::Int32(v) => v.0 as u64,

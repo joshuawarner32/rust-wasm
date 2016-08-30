@@ -1,6 +1,6 @@
 use std::{str, mem, fmt};
 
-use types::{Type, Pr, IntType, FloatType};
+use types::{Type, Pr, IntType, FloatType, Sign, Dynamic};
 use reader::Reader;
 use ops::{NormalOp, LinearOpReader, BlockOpReader,
     IntBinOp, IntCmpOp, IntUnOp,
@@ -128,6 +128,63 @@ pub struct FunctionBuilder {
     pub local_types: Vec<Type>,
 }
 
+fn write_var_i32(ast: &mut Vec<u8>, v: i32) {
+    let mut v = v;
+    while v >= 64 || v < -64 {
+        ast.push(unsafe { mem::transmute::<i32, u32>(v & 0xff) as u8 } | 0x80);
+        v >>= 7;
+    }
+    ast.push((v & 0x7f) as u8);
+}
+
+// fn write_var_u64(ast: &mut Vec<u8>, v: u64) {
+//     let mut v = v;
+//     while v >= 0x80 {
+//         ast.push(((v & 0xff) as u8) | 0x80);
+//         v >>= 7;
+//     }
+//     ast.push((v & 0xff) as u8);
+// }
+
+fn write_var_i64(ast: &mut Vec<u8>, v: i64) {
+    let mut v = v;
+    while v >= 64 || v < -64 {
+        ast.push(unsafe { mem::transmute::<i64, u64>(v & 0xff) as u8 } | 0x80);
+        v >>= 7;
+    }
+    ast.push((v & 0x7f) as u8);
+}
+
+#[test]
+fn test_write_var_i64() {
+    let mut buf = Vec::new();
+    for i in -256..256 {
+        buf.clear();
+        write_var_i64(&mut buf, i);
+        let ib = Reader::new(&mut buf).read_var_i64();
+        assert_eq!(i, ib);
+    }
+}
+
+fn write_u32(ast: &mut Vec<u8>, v: u32) {
+    ast.push(((v >> 0*8) & 0xff) as u8);
+    ast.push(((v >> 1*8) & 0xff) as u8);
+    ast.push(((v >> 2*8) & 0xff) as u8);
+    ast.push(((v >> 3*8) & 0xff) as u8);
+}
+
+fn write_u64(ast: &mut Vec<u8>, v: u64) {
+    ast.push(((v >> 0*8) & 0xff) as u8);
+    ast.push(((v >> 1*8) & 0xff) as u8);
+    ast.push(((v >> 2*8) & 0xff) as u8);
+    ast.push(((v >> 3*8) & 0xff) as u8);
+    ast.push(((v >> (4+0)*8) & 0xff) as u8);
+    ast.push(((v >> (4+1)*8) & 0xff) as u8);
+    ast.push(((v >> (4+2)*8) & 0xff) as u8);
+    ast.push(((v >> (4+3)*8) & 0xff) as u8);
+}
+
+
 impl FunctionBuilder {
     pub fn new() -> FunctionBuilder {
         FunctionBuilder {
@@ -152,10 +209,46 @@ impl FunctionBuilder {
             }
         }
 
+        if last.1 > 0 {
+            locals.push(last);
+        }
+
         let mut ast = Vec::new();
 
         for op in self.ops {
             match op {
+                NormalOp::Return{has_arg} => {
+                    ast.push(0x09);
+                    ast.push(if has_arg { 1 } else { 0 });
+                }
+                NormalOp::GetLocal(index) => {
+                    ast.push(0x14);
+                    ast.push(index as u8);
+                }
+                NormalOp::SetLocal(index) => {
+                    ast.push(0x15);
+                    ast.push(index as u8);
+                }
+                NormalOp::TeeLocal(index) => {
+                    ast.push(0x16);
+                    ast.push(index as u8);
+                }
+                NormalOp::Const(Dynamic::Int32(v)) => {
+                    ast.push(0x10);
+                    write_var_i32(&mut ast, unsafe { mem::transmute(v) })
+                }
+                NormalOp::Const(Dynamic::Int64(v)) => {
+                    ast.push(0x11);
+                    write_var_i64(&mut ast, unsafe { mem::transmute(v) })
+                }
+                NormalOp::Const(Dynamic::Float32(v)) => {
+                    ast.push(0x13);
+                    write_u32(&mut ast, unsafe { mem::transmute(v) })
+                }
+                NormalOp::Const(Dynamic::Float64(v)) => {
+                    ast.push(0x12);
+                    write_u64(&mut ast, unsafe { mem::transmute(v) })
+                }
                 NormalOp::IntBin(IntType::Int32, IntBinOp::Add) => ast.push(0x40),
                 NormalOp::IntBin(IntType::Int32, IntBinOp::Sub) => ast.push(0x41),
                 NormalOp::IntBin(IntType::Int32, IntBinOp::Mul) => ast.push(0x42),
@@ -254,16 +347,32 @@ impl FunctionBuilder {
                 NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Le) => ast.push(0x9a),
                 NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Gt) => ast.push(0x9b),
                 NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge) => ast.push(0x9c),
-                NormalOp::Return{has_arg} => {
-                    ast.push(0x09);
-                    ast.push(if has_arg { 1 } else { 0 });
-                }
-                NormalOp::GetLocal(index) => {
-                    ast.push(0x14);
-                    ast.push(index as u8);
-                }
-                _ => {}
-                // _ => panic!()
+                NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Signed) => ast.push(0x9d),
+                NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Signed) => ast.push(0x9e),
+                NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Unsigned) => ast.push(0x9f),
+                NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Unsigned) => ast.push(0xa0),
+                NormalOp::IntTruncate => ast.push(0xa1),
+                NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Signed) => ast.push(0xa2),
+                NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Signed) => ast.push(0xa3),
+                NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Unsigned) => ast.push(0xa4),
+                NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Unsigned) => ast.push(0xa5),
+                NormalOp::IntExtend(Sign::Signed) => ast.push(0xa6),
+                NormalOp::IntExtend(Sign::Unsigned) => ast.push(0xa7),
+                NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float32) => ast.push(0xa8),
+                NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float32) => ast.push(0xa9),
+                NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float32) => ast.push(0xaa),
+                NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float32) => ast.push(0xab),
+                NormalOp::FloatConvert(FloatType::Float32) => ast.push(0xac),
+                NormalOp::Reinterpret(Type::Int32, Type::Float32) => ast.push(0xad),
+                NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float64) => ast.push(0xae),
+                NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float64) => ast.push(0xaf),
+                NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float64) => ast.push(0xb0),
+                NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float64) => ast.push(0xb1),
+                NormalOp::FloatConvert(FloatType::Float64) => ast.push(0xb2),
+                NormalOp::Reinterpret(Type::Float64, Type::Int64) => ast.push(0xb3),
+                NormalOp::Reinterpret(Type::Float32, Type::Int32) => ast.push(0xb4),
+                NormalOp::Reinterpret(Type::Int64, Type::Float64) => ast.push(0xb5),
+                _ => panic!()
             }
         }
 
@@ -316,6 +425,17 @@ impl<B: AsBytes> Module<B> {
         for e in &self.exports {
             if e.function_name.as_bytes() == name {
                 return Some(e.function_index);
+            }
+        }
+        None
+    }
+
+    pub fn find_by_debug_name(&self, name: &[u8]) -> Option<FunctionIndex> {
+        println!("looking for {}", str::from_utf8(name).unwrap());
+        for (i, e) in self.names.iter().enumerate() {
+            println!("checking {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
+            if e.function_name.as_bytes() == name {
+                return Some(FunctionIndex(i));
             }
         }
         None
