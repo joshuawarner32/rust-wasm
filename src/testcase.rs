@@ -108,7 +108,9 @@ impl Invoke {
             instance.module.find(self.function_name.as_bytes())
             .or_else(|| instance.module.find_by_debug_name(self.function_name.as_bytes()))
             .unwrap();
-        instance.invoke(func, &self.arguments)
+        let res = instance.invoke(func, &self.arguments);
+        assert_eq!(instance.call_stack_depth, 0);
+        res
     }
 }
 

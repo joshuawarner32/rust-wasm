@@ -110,7 +110,7 @@ impl Memory {
 pub struct Instance<'a, B: AsBytes + 'a> {
     pub memory: Memory,
     pub module: &'a Module<B>,
-    call_stack_depth: usize,
+    pub call_stack_depth: usize,
 }
 
 fn read_u32(data: &[u8]) -> u32 {
@@ -150,11 +150,13 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             self.module.find_name(func)
                 .and_then(|n| str::from_utf8(n).ok())
                 .unwrap_or("<unknown>"));
-        self.call_stack_depth += 1;
 
-        if self.call_stack_depth > 1000 {
+        if self.call_stack_depth > 200 {
             return InterpResult::Trap;
         }
+
+        self.call_stack_depth += 1;
+
 
         let ty = &self.module.functions[func.0];
         if args.len() != ty.param_types.as_bytes().len() {
@@ -187,18 +189,6 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             Branch(u32, Option<Dynamic>),
             Return(Option<Dynamic>),
             Trap,
-        }
-
-        macro_rules! prv {
-            ($val:expr) => {{ let val = $val; match val { Res::Value(v) => v, val => return val}}}
-        }
-
-        macro_rules! pr {
-            ($val:expr) => {{ let val = $val; match val { Res::Value(Some(v)) => v, Res::Value(None) => panic!(), val => return val}}}
-        }
-
-        macro_rules! prb {
-            ($val:expr) => {{ let val = $val; match val { Res::Value(v) => {}, val => return val}}}
         }
 
         fn run_block<'a, B: AsBytes>(context: &'a mut Context<B>, ops: &[BlockOp]) -> Res {
@@ -445,8 +435,6 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         };
 
         let res = {
-
-
             let mut context = Context {
                 instance: self,
                 locals: locals,
