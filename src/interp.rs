@@ -110,6 +110,7 @@ impl Memory {
 pub struct Instance<'a, B: AsBytes + 'a> {
     pub memory: Memory,
     pub module: &'a Module<B>,
+    call_stack_depth: usize,
 }
 
 fn read_u32(data: &[u8]) -> u32 {
@@ -139,7 +140,8 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         Instance {
             memory: Memory(memory),
-            module: module
+            module: module,
+            call_stack_depth: 0,
         }
     }
 
@@ -148,6 +150,11 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             self.module.find_name(func)
                 .and_then(|n| str::from_utf8(n).ok())
                 .unwrap_or("<unknown>"));
+        self.call_stack_depth += 1;
+
+        if self.call_stack_depth > 1000 {
+            return InterpResult::Trap;
+        }
 
         let ty = &self.module.functions[func.0];
         if args.len() != ty.param_types.as_bytes().len() {
@@ -437,17 +444,22 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             res
         };
 
-        let mut context = Context {
-            instance: self,
-            locals: locals,
-            stack: Vec::new(),
+        let res = {
+
+
+            let mut context = Context {
+                instance: self,
+                locals: locals,
+                stack: Vec::new(),
+            };
+            match run_block(&mut context, &root_ops) {
+                Res::Value(v) | Res::Return(v) => InterpResult::Value(v),
+                Res::Trap => InterpResult::Trap,
+                _ => panic!()
+            }
         };
 
-        let res = match run_block(&mut context, &root_ops) {
-            Res::Value(v) | Res::Return(v) => InterpResult::Value(v),
-            Res::Trap => InterpResult::Trap,
-            _ => panic!()
-        };
+        self.call_stack_depth -= 1;
 
         res
     }
