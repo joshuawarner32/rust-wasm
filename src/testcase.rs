@@ -116,7 +116,7 @@ impl Invoke {
 }
 
 pub enum Assert {
-    Return(Invoke, Dynamic),
+    Return(Invoke, Option<Dynamic>),
     ReturnNan(Invoke),
     Trap(Invoke)
 }
@@ -125,22 +125,23 @@ impl Assert {
     fn run<'a, B: AsBytes>(&self, instance: &mut Instance<'a, B>) {
         match self {
             &Assert::Return(ref invoke, result) => {
-                println!("testing {} => {}", invoke, result);
+                println!("testing {} => {:?}", invoke, result);
                 let a = invoke.run(instance);
                 match (a, result) {
-                    (InterpResult::Value(Some(Dynamic::Int32(a))), Dynamic::Int32(b)) => assert_eq!(a, b),
-                    (InterpResult::Value(Some(Dynamic::Int64(a))), Dynamic::Int64(b)) => assert_eq!(a, b),
-                    (InterpResult::Value(Some(Dynamic::Float32(a))), Dynamic::Float32(b)) => {
+                    (InterpResult::Value(Some(Dynamic::Int32(a))), Some(Dynamic::Int32(b))) => assert_eq!(a, b),
+                    (InterpResult::Value(Some(Dynamic::Int64(a))), Some(Dynamic::Int64(b))) => assert_eq!(a, b),
+                    (InterpResult::Value(Some(Dynamic::Float32(a))), Some(Dynamic::Float32(b))) => {
                         println!("{} {}", a, b);
                         assert!(a == b ||
                             (a.is_nan() && b.is_nan() && a.is_sign_negative() == b.is_sign_negative()));
                     }
-                    (InterpResult::Value(Some(Dynamic::Float64(a))), Dynamic::Float64(b)) => {
+                    (InterpResult::Value(Some(Dynamic::Float64(a))), Some(Dynamic::Float64(b))) => {
                         println!("{} {}", a, b);
                         assert!(a == b ||
                             (a.is_nan() && b.is_nan() && a.is_sign_negative() == b.is_sign_negative()));
                     }
-                    _ => panic!("no match: {:?} vs {:}", a, result)
+                    (InterpResult::Value(None), None) => {}
+                    _ => panic!("no match: {:?} vs {:?}", a, result)
                 }
             }
             &Assert::ReturnNan(ref invoke) => {
@@ -270,7 +271,8 @@ impl TestCase {
                                 let mut ctx = FunctionContext {
                                     func: FunctionBuilder::new(),
                                     local_names: HashMap::new(),
-                                    function_names: &function_names
+                                    function_names: &function_names,
+                                    label_names: Vec::new()
                                 };
 
                                 while let Some(s) = it.next() {
@@ -318,7 +320,6 @@ impl TestCase {
                                         };
                                         (local *args) => {
                                             for ty in args {
-                                                println!("gotit {:?}", text);
                                                 if let &Sexpr::Identifier(ref v) = ty {
                                                     ctx.func.local_types.push(parse_type(v.as_str()));
                                                 } else {
@@ -398,8 +399,11 @@ impl TestCase {
                     // TODO
                     // panic!("8");
                 };
+                (assert_return &invoke) => {
+                    modules.last_mut().unwrap().1.push(Assert::Return(parse_invoke(invoke), None));
+                };
                 (assert_return &invoke &result) => {
-                    modules.last_mut().unwrap().1.push(Assert::Return(parse_invoke(invoke), parse_const(result)));
+                    modules.last_mut().unwrap().1.push(Assert::Return(parse_invoke(invoke), Some(parse_const(result))));
                 };
                 (assert_return_nan &invoke) => {
                     modules.last_mut().unwrap().1.push(Assert::ReturnNan(parse_invoke(invoke)));
@@ -434,8 +438,11 @@ impl TestCase {
 struct FunctionContext<'a> {
     local_names: HashMap<&'a str, usize>,
     func: FunctionBuilder,
-    function_names: &'a HashMap<&'a str, usize>
+    function_names: &'a HashMap<&'a str, usize>,
+    label_names: Vec<&'a str>
 }
+
+const EMPTY_DATA: &'static [u8] = &[];
 
 impl<'a> FunctionContext<'a> {
     fn read_local(&self, expr: &Sexpr) -> usize {
@@ -454,7 +461,22 @@ impl<'a> FunctionContext<'a> {
         }
     }
 
-    fn parse_ops(&mut self, exprs: &[Sexpr]) -> usize {
+    fn read_label(&self, expr: &Sexpr) -> usize {
+        match expr {
+            &Sexpr::Variable(ref name) => {
+                for i in (0..self.label_names.len() - 1).rev() {
+                    if self.label_names[i] == name {
+                        return i;
+                    }
+                }
+                panic!("no label named {}", expr)
+            }
+            &Sexpr::Identifier(ref num) => usize::from_str(num).unwrap(),
+            _ => panic!("no label named {}", expr)
+        }
+    }
+
+    fn parse_ops(&mut self, exprs: &'a [Sexpr]) -> usize {
         let mut num = 0;
         for s in exprs {
             self.parse_op(s);
@@ -467,12 +489,31 @@ impl<'a> FunctionContext<'a> {
         self.func.ops.push(LinearOp::Normal(op));
     }
 
-    fn parse_op(&mut self, s: &Sexpr) {
+    fn parse_op(&mut self, s: &'a Sexpr) {
         sexpr_match!(s;
             (ident:&op *args) => {
                 match op.as_str() {
                     "nop" => {self.push(NormalOp::Nop);},
-                    // "block" => NormalOp::Nop,
+                    "block" => {
+                        let (index, label_name) = if args.len() > 0 {
+                            match &args[0] {
+                                &Sexpr::Variable(ref v) => (1, Some(v.as_str())),
+                                _ => (0, None)
+                            }
+                        } else {
+                            (0, None)
+                        };
+
+                        if let Some(label) = label_name {
+                            self.label_names.push(label);
+                        }
+                        self.func.ops.push(LinearOp::Block);
+                        self.parse_ops(&args[index..]);
+                        self.func.ops.push(LinearOp::End);
+                        if let Some(_) = label_name {
+                            self.label_names.pop().unwrap();
+                        }
+                    }
                     // "loop" => NormalOp::Nop,
                     "if" => {
                         assert!(args.len() == 2 || args.len() == 3);
@@ -485,17 +526,58 @@ impl<'a> FunctionContext<'a> {
                         }
                         self.func.ops.push(LinearOp::End);
                     }
-                    // "else" => NormalOp::Nop,
                     // "select" => NormalOp::Nop,
-                    // "br" => NormalOp::Nop,
-                    // "brif" => NormalOp::Nop,
-                    // "brtable" => NormalOp::Nop,
+                    "br" => {
+                        let relative_depth = self.read_label(&args[0]);
+
+                        if args.len() > 1 {
+                            self.parse_op(&args[1]);
+                            self.push(NormalOp::Br{has_arg: true, relative_depth: relative_depth as u32});
+                        } else {
+                            self.push(NormalOp::Br{has_arg: false, relative_depth: relative_depth as u32});
+                        }
+                    }
+                    "br_if" => {
+                        let relative_depth = self.read_label(&args[0]);
+                        self.parse_op(&args[1]);
+
+                        if args.len() > 2 {
+                            self.parse_op(&args[2]);
+                            self.push(NormalOp::BrIf{has_arg: true, relative_depth: relative_depth as u32});
+                        } else {
+                            self.push(NormalOp::BrIf{has_arg: false, relative_depth: relative_depth as u32});
+                        }
+                    }
+                    "br_table" => {
+                        let relative_depth = self.read_label(&args[0]);
+
+                        let mut i = 1;
+
+                        loop {
+                            match &args[i] {
+                                &Sexpr::Variable(_) => {},
+                                &Sexpr::Identifier(_) => {},
+                                _ => break,
+                            }
+                            i += 1;
+                        }
+
+                        self.parse_op(&args[i]);
+                        if args.len() - i > 2 {
+                            self.parse_ops(&args[args.len() - 2..]);
+                            self.push(NormalOp::BrTable{has_arg: true, target_data: &EMPTY_DATA, default: relative_depth as u32});
+                        } else {
+                            self.push(NormalOp::BrTable{has_arg: false, target_data: &EMPTY_DATA, default: relative_depth as u32});
+                        }
+                    }
                     "return" => {
                         let num = self.parse_ops(args);
                         assert!(num == 0 || num == 1);
                         self.push(NormalOp::Return{has_arg: num == 1});
                     }
-                    // "unreachable" => { self.push(NormalOp::Nop); }
+                    "unreachable" => {
+                        self.push(NormalOp::Unreachable);
+                    }
                     // "drop" => { self.push(NormalOp::Nop); }
                     // "end" => { self.push(NormalOp::Nop); }
                     "i32.const" |

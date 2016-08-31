@@ -441,7 +441,19 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                 stack: Vec::new(),
             };
             match run_block(&mut context, &root_ops) {
-                Res::Value(v) | Res::Return(v) => InterpResult::Value(v),
+                Res::Value(v) | Res::Return(v) => {
+                    match ty.return_type {
+                        Some(ty) => {
+                            assert_eq!(ty, v.unwrap().get_type());
+                            InterpResult::Value(v)
+                        }
+                        None => {
+                            // TODO: we really ought to be asserting that v is None here... but
+                            // we're having some problems with Dropping values (see block.wast: drop-last)
+                            InterpResult::Value(None)
+                        }
+                    }
+                }
                 Res::Trap => InterpResult::Trap,
                 _ => panic!()
             }

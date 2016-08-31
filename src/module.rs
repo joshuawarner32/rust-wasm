@@ -237,14 +237,35 @@ impl FunctionBuilder {
 
         for op in self.ops {
             match op {
+                LinearOp::Block => ast.push(0x01),
                 LinearOp::If => ast.push(0x03),
                 LinearOp::Else => ast.push(0x04),
                 LinearOp::End => ast.push(0x0f),
                 LinearOp::Normal(op) => match op {
+                    NormalOp::Nop => ast.push(0x00),
+                    NormalOp::Br{has_arg, relative_depth} => {
+                        ast.push(0x06);
+                        ast.push(if has_arg { 1 } else { 0 });
+                        write_var_u32(&mut ast, relative_depth);
+                    }
+                    NormalOp::BrIf{has_arg, relative_depth} => {
+                        ast.push(0x07);
+                        ast.push(if has_arg { 1 } else { 0 });
+                        write_var_u32(&mut ast, relative_depth);
+                    }
+                    NormalOp::BrTable{has_arg, target_data, default} => {
+                        ast.push(0x08);
+                        ast.push(if has_arg { 1 } else { 0 });
+                        assert!(target_data.len() % 4 == 0);
+                        write_var_u32(&mut ast, (target_data.len() / 4) as u32);
+                        ast.extend(target_data);
+                        write_u32(&mut ast, default);
+                    }
                     NormalOp::Return{has_arg} => {
                         ast.push(0x09);
                         ast.push(if has_arg { 1 } else { 0 });
                     }
+                    NormalOp::Unreachable => ast.push(0x0a),
                     NormalOp::GetLocal(index) => {
                         ast.push(0x14);
                         ast.push(index as u8);
