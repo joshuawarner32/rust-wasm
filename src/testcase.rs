@@ -563,8 +563,8 @@ impl<'a> FunctionContext<'a> {
                         }
 
                         self.parse_op(&args[i]);
-                        if args.len() - i > 2 {
-                            self.parse_ops(&args[args.len() - 2..]);
+                        if i + 1 < args.len() {
+                            self.parse_op(&args[i + 1]);
                             self.push(NormalOp::BrTable{has_arg: true, target_data: &EMPTY_DATA, default: relative_depth as u32});
                         } else {
                             self.push(NormalOp::BrTable{has_arg: false, target_data: &EMPTY_DATA, default: relative_depth as u32});

@@ -496,7 +496,7 @@ impl<B: AsBytes> Module<B> {
     }
 
     pub fn find_name(&self, index: FunctionIndex) -> Option<&[u8]> {
-        if self.names.len() > index.0 {
+        if self.names.len() > index.0 && self.names[index.0].function_name.as_bytes().len() > 0 {
             return Some(self.names[index.0].function_name.as_bytes());
         }
         for e in &self.exports {

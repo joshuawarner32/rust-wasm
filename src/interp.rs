@@ -180,7 +180,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         struct Context<'b, 'a: 'b, B: AsBytes + 'a> {
             instance: &'b mut Instance<'a, B>,
             locals: Vec<Dynamic>,
-            stack: Vec<Dynamic>,
+            stack: Vec<Option<Dynamic>>,
         }
 
         #[derive(Debug)]
@@ -195,8 +195,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             if ops.len() > 0 {
                 for i in &ops[..ops.len() - 1] {
                     match run_instr(context, i) {
-                        Res::Value(Some(v)) => context.stack.push(v),
-                        Res::Value(None) => {}
+                        Res::Value(v) => context.stack.push(v),
                         val => return val
                     }
                 }
@@ -209,54 +208,79 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         fn run_instr<'a, B: AsBytes>(context: &'a mut Context<B>, op: &BlockOp) -> Res {
             println!("run {}", op);
             let res = match op {
-                &BlockOp::Block(Block::Block(ref ops)) => match run_block(context, ops) {
-                    Res::Branch(0, val) => Res::Value(val),
-                    Res::Branch(n, val) => Res::Branch(n - 1, val),
-                    x => x
-                },
-                &BlockOp::Block(Block::Loop(ref ops)) => {
-                    loop {
-                        match run_block(context, ops) {
-                            val@ Res::Return(_) => return val,
-                            val@ Res::Trap => return val,
-                            val@ Res::Value(_) => return val,
-                            Res::Branch(0, _) => continue,
-                            Res::Branch(1, val) => return Res::Value(val),
-                            Res::Branch(x, val) => return Res::Branch(x - 2, val),
-                        }
-                    }
-                }
-                &BlockOp::Block(Block::If(ref then, ref otherwise)) => {
-                    let cond = context.stack.pop().unwrap();
-                    match run_block(context, if cond.to_u32() != 0 { then } else { otherwise }) {
+                &BlockOp::Block(Block::Block(ref ops)) => {
+                    let stack_depth = context.stack.len();
+                    let res = match run_block(context, ops) {
                         Res::Branch(0, val) => Res::Value(val),
                         Res::Branch(n, val) => Res::Branch(n - 1, val),
                         x => x
+                    };
+                    context.stack.resize(stack_depth, None);
+                    res
+                }
+                &BlockOp::Block(Block::Loop(ref ops)) => {
+                    loop {
+                        let stack_depth = context.stack.len();
+                        match run_block(context, ops) {
+                            val@ Res::Return(_) => {
+                                context.stack.resize(stack_depth, None);
+                                return val
+                            }
+                            val@ Res::Trap => {
+                                context.stack.resize(stack_depth, None);
+                                return val
+                            }
+                            val@ Res::Value(_) => {
+                                context.stack.resize(stack_depth, None);
+                                return val
+                            }
+                            Res::Branch(0, _) => continue,
+                            Res::Branch(1, val) => {
+                                context.stack.resize(stack_depth, None);
+                                return Res::Value(val)
+                            }
+                            Res::Branch(x, val) => {
+                                context.stack.resize(stack_depth, None);
+                                return Res::Branch(x - 2, val)
+                            }
+                        }
+                        context.stack.resize(stack_depth, None);
                     }
+                }
+                &BlockOp::Block(Block::If(ref then, ref otherwise)) => {
+                    let cond = context.stack.pop().unwrap().unwrap();
+                    let stack_depth = context.stack.len();
+                    let res = match run_block(context, if cond.to_u32() != 0 { then } else { otherwise }) {
+                        Res::Branch(0, val) => Res::Value(val),
+                        Res::Branch(n, val) => Res::Branch(n - 1, val),
+                        x => x
+                    };
+                    context.stack.resize(stack_depth, None);
+                    res
                 }
                 &BlockOp::Normal(ref op) => match op {
                     &NormalOp::Nop => Res::Value(None),
                     &NormalOp::Select => {
                         let b = context.stack.pop().unwrap();
                         let a = context.stack.pop().unwrap();
-                        let cond = context.stack.pop().unwrap();
-                        Res::Value(Some(if cond.to_u32() != 0 { a } else { b }))
+                        let cond = context.stack.pop().unwrap().unwrap();
+                        Res::Value(if cond.to_u32() != 0 { a } else { b })
                     },
                     &NormalOp::Br{has_arg, relative_depth} => {
                         let val = if has_arg {
-                            Some(context.stack.pop().unwrap())
+                            context.stack.pop().unwrap()
                         } else {
                             None
                         };
                         Res::Branch(relative_depth, val)
                     }
                     &NormalOp::BrIf{has_arg, relative_depth} => {
+                        let cond = context.stack.pop().unwrap().unwrap();
                         let val = if has_arg {
-                            Some(context.stack.pop().unwrap())
+                            context.stack.pop().unwrap()
                         } else {
                             None
                         };
-                        let cond = context.stack.pop().unwrap();
                         if cond.to_u32() != 0 {
                             Res::Branch(relative_depth, val)
                         } else {
@@ -264,12 +288,12 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         }
                     }
                     &NormalOp::BrTable{has_arg, target_data, default} => {
+                        let value = context.stack.pop().unwrap().unwrap().to_u32() as usize;
                         let val = if has_arg {
-                            Some(context.stack.pop().unwrap())
+                            context.stack.pop().unwrap()
                         } else {
                             None
                         };
-                        let value = context.stack.pop().unwrap().to_u32() as usize;
                         let relative_depth = if value >= target_data.len() / 4 {
                             default
                         } else {
@@ -279,7 +303,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     }
                     &NormalOp::Return{has_arg} => {
                         if has_arg {
-                            Res::Return(Some(context.stack.pop().unwrap()))
+                            Res::Return(context.stack.pop().unwrap())
                         } else {
                             Res::Return(None)
                         }
@@ -300,19 +324,20 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         Res::Value(Some(val))
                     }
                     &NormalOp::SetLocal(local) => {
-                        let val = context.stack.pop().unwrap();
+                        let val = context.stack.pop().unwrap().unwrap();
                         context.locals[local as usize] = val;
                         Res::Value(Some(val)) // TODO: this should be None.
                     }
                     &NormalOp::TeeLocal(local) => {
-                        let val = context.stack.pop().unwrap();
+                        let val = context.stack.pop().unwrap().unwrap();
                         context.locals[local as usize] = val;
                         Res::Value(Some(val))
                     }
                     &NormalOp::Call{argument_count, index} => {
                         let stack_len = context.stack.len();
                         let res = {
-                            let args = &context.stack[stack_len - argument_count as usize..];
+                            let args = context.stack[stack_len - argument_count as usize..]
+                                .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
                             match context.instance.invoke(index, &args) {
                                 InterpResult::Value(v) => Res::Value(v),
                                 InterpResult::Trap => return Res::Trap,
@@ -322,13 +347,14 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         res
                     }
                     &NormalOp::CallIndirect{argument_count, index: type_index} => {
-                        let table_index = context.stack.pop().unwrap().to_u32();
+                        let table_index = context.stack.pop().unwrap().unwrap().to_u32();
 
                         let index = context.instance.module.table[table_index as usize];
 
                         let stack_len = context.stack.len();
                         let res = {
-                            let args = &context.stack[stack_len - argument_count as usize..];
+                            let args = context.stack[stack_len - argument_count as usize..]
+                                .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
                             match context.instance.invoke(index, &args) {
                                 InterpResult::Value(v) => Res::Value(v),
                                 InterpResult::Trap => return Res::Trap,
@@ -341,23 +367,23 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         panic!();
                     }
                     &NormalOp::IntLoad(inttype, sign, size, memimm) => {
-                        let addr = context.stack.pop().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(context.instance.memory.load_int(addr.to_u32(), inttype, sign, size, memimm)))
                     }
                     &NormalOp::FloatLoad(floattype, memimm) => {
-                        let addr = context.stack.pop().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(context.instance.memory.load_float(addr.to_u32(), floattype, memimm)))
                     }
                     &NormalOp::IntStore(inttype, size, memimm) => {
-                        let addr = context.stack.pop().unwrap();
-                        let value = context.stack.pop().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
+                        let value = context.stack.pop().unwrap().unwrap();
                         assert!(value.get_type() == inttype.to_type());
                         context.instance.memory.store_int(addr.to_u32(), value, size, memimm);
                         Res::Value(Some(value))
                     }
                     &NormalOp::FloatStore(floattype, memimm) => {
-                        let addr = context.stack.pop().unwrap();
-                        let value = context.stack.pop().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
+                        let value = context.stack.pop().unwrap().unwrap();
                         context.instance.memory.store_float(addr.to_u32(), value, floattype, memimm);
                         Res::Value(Some(value))
                     }
@@ -370,62 +396,62 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     }
 
                     &NormalOp::IntBin(inttype, intbinop) => {
-                        let b = context.stack.pop().unwrap();
-                        let a = context.stack.pop().unwrap();
+                        let b = context.stack.pop().unwrap().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         match interp_int_bin(inttype, intbinop, a, b) {
                             InterpResult::Value(v) => Res::Value(v),
                             InterpResult::Trap => Res::Trap,
                         }
                     }
                     &NormalOp::IntCmp(inttype, intcmpop) => {
-                        let b = context.stack.pop().unwrap();
-                        let a = context.stack.pop().unwrap();
+                        let b = context.stack.pop().unwrap().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_cmp(inttype, intcmpop, a, b)))
                     }
                     &NormalOp::IntUn(inttype, intunop) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_un(inttype, intunop, a)))
                     }
                     &NormalOp::IntEqz(inttype) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_eqz(inttype, a)))
                     }
                     &NormalOp::FloatBin(floattype, floatbinop) => {
-                        let b = context.stack.pop().unwrap();
-                        let a = context.stack.pop().unwrap();
+                        let b = context.stack.pop().unwrap().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_float_bin(floattype, floatbinop, a, b)))
                     }
                     &NormalOp::FloatUn(floattype, floatunop) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_float_un(floattype, floatunop, a)))
                     }
                     &NormalOp::FloatCmp(floattype, floatcmpop) => {
-                        let b = context.stack.pop().unwrap();
-                        let a = context.stack.pop().unwrap();
+                        let b = context.stack.pop().unwrap().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_float_cmp(floattype, floatcmpop, a, b)))
                     }
                     &NormalOp::FloatToInt(floattype, inttype, sign) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_float_to_int(floattype, inttype, sign, a)))
                     }
                     &NormalOp::IntExtend(sign) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_extend(sign, a)))
                     }
                     &NormalOp::IntTruncate => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_truncate(a)))
                     }
                     &NormalOp::IntToFloat(inttype, sign, floattype) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_int_to_float(inttype, sign, floattype, a)))
                     }
                     &NormalOp::FloatConvert(floattype) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_float_convert(floattype, a)))
                     }
                     &NormalOp::Reinterpret(type_from, type_to) => {
-                        let a = context.stack.pop().unwrap();
+                        let a = context.stack.pop().unwrap().unwrap();
                         Res::Value(Some(interp_reinterpret(type_from, type_to, a)))
                     }
                 }
