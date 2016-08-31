@@ -7,6 +7,7 @@ pub mod ops;
 mod interp;
 mod testcase;
 mod sexpr;
+mod hexfloat;
 
 pub use types::Dynamic;
 pub use module::{Module, FunctionIndex};

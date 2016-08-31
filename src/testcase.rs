@@ -1,5 +1,5 @@
 use std::str::{self, FromStr};
-use std::{mem, f64, fmt};
+use std::{mem, f32, f64, fmt};
 use std::collections::HashMap;
 use std::num::Wrapping;
 
@@ -8,6 +8,7 @@ use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex
 use types::{Type, Dynamic, IntType, FloatType, Sign};
 use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp};
 use interp::{Instance, InterpResult};
+use hexfloat;
 
 macro_rules! vec_form {
     ($val:expr => () => $code:expr) => {{
@@ -1085,74 +1086,6 @@ fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
     }
 }
 
-fn parse_hex_digit(ch: char) -> usize {
-    match ch {
-        '0'...'9' => (ch as usize) - ('0' as usize),
-        'a'...'f' => (ch as usize) - ('a' as usize) + 10,
-        'A'...'F' => (ch as usize) - ('A' as usize) + 10,
-        _ => panic!(),
-    }
-}
-
-fn parse_hex_float(mut text: &str) -> f64 {
-    println!("parsing {}", text);
-
-    assert!(text.starts_with("0x"));
-    let text = &text[2..];
-
-    let (d, f, e) = match text.find(|c| c == '.') {
-        None => match text.find(|c| c == 'p') {
-            None => (text, "", ""),
-            Some(pindex) => (&text[..pindex], "", &text[pindex + 1..]),
-        },
-        Some(dindex) => match text[dindex + 1..].find(|c| c == 'p') {
-            None => (&text[..dindex], &text[dindex + 1..], ""),
-            Some(pindex) => (&text[..dindex], &text[dindex + 1..dindex + pindex + 1], &text[dindex + pindex + 2..]),
-        }
-    };
-
-    println!("d [{}] f [{}] e [{}]", d, f, e);
-
-    let mut exp = if e.len() > 0 { i32::from_str(e).unwrap() } else { 0 };
-    assert!(exp >= -1022 && exp <= 1023);
-
-    let mut bits = 0u64;
-
-    let mut shift = 64 - 4;
-    for ch in d.chars() {
-        bits |= (parse_hex_digit(ch) as u64) << shift;
-        shift -= 4;
-        exp += 4;
-    }
-    for ch in f.chars() {
-        bits |= (parse_hex_digit(ch) as u64) << shift;
-        shift -= 4;
-    }
-
-    let leading = bits.leading_zeros();
-    bits <<= leading;
-    exp -= leading as i32;
-
-    if exp < -1022 {
-        let diff = -1022 - exp;
-        if diff < 52 {
-            bits >>= diff - 1;
-            exp = -1023;
-        } else {
-            bits = 0;
-            exp = -1023;
-        }
-    } else {
-        bits &= !0x7fff_ffff_ffff_ffff;
-        bits >>= 1;
-    }
-
-    bits >>= 12;
-
-    bits |= ((exp + 1023) as u64) << 52;
-    unsafe { mem::transmute(bits) }
-}
-
 fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
@@ -1167,7 +1100,7 @@ fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
             };
 
             let mut res = if text.starts_with("0x") {
-                parse_hex_float(text)
+                unsafe { mem::transmute(hexfloat::parse_bits_64(text)) }
             } else if text == "infinity" {
                 f64::INFINITY
             } else if text == "nan" {
