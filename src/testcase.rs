@@ -514,7 +514,42 @@ impl<'a> FunctionContext<'a> {
                             self.label_names.pop().unwrap();
                         }
                     }
-                    // "loop" => NormalOp::Nop,
+                    "loop" => {
+                        let (index, label_name_begin) = if args.len() > 0 {
+                            match &args[0] {
+                                &Sexpr::Variable(ref v) => (1, Some(v.as_str())),
+                                _ => (0, None)
+                            }
+                        } else {
+                            (0, None)
+                        };
+
+                        let (index, label_name_end) = if index + 1 < args.len() {
+                            match &args[0] {
+                                &Sexpr::Variable(ref v) => (index + 1, Some(v.as_str())),
+                                _ => (index, None)
+                            }
+                        } else {
+                            (index, None)
+                        };
+
+                        if let Some(label) = label_name_begin {
+                            self.label_names.push(label);
+                        }
+
+                        if let Some(label) = label_name_end {
+                            self.label_names.push(label);
+                        }
+                        self.func.ops.push(LinearOp::Loop);
+                        self.parse_ops(&args[index..]);
+                        self.func.ops.push(LinearOp::End);
+                        if let Some(_) = label_name_begin {
+                            self.label_names.pop().unwrap();
+                        }
+                        if let Some(_) = label_name_end {
+                            self.label_names.pop().unwrap();
+                        }
+                    }
                     "if" => {
                         assert!(args.len() == 2 || args.len() == 3);
                         self.parse_op(&args[0]);
@@ -526,7 +561,10 @@ impl<'a> FunctionContext<'a> {
                         }
                         self.func.ops.push(LinearOp::End);
                     }
-                    // "select" => NormalOp::Nop,
+                    "select" => {
+                        assert!(self.parse_ops(args) == 3);
+                        self.push(NormalOp::Select);
+                    }
                     "br" => {
                         let relative_depth = self.read_label(&args[0]);
 

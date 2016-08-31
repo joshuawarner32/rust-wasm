@@ -238,11 +238,13 @@ impl FunctionBuilder {
         for op in self.ops {
             match op {
                 LinearOp::Block => ast.push(0x01),
+                LinearOp::Loop => ast.push(0x02),
                 LinearOp::If => ast.push(0x03),
                 LinearOp::Else => ast.push(0x04),
                 LinearOp::End => ast.push(0x0f),
                 LinearOp::Normal(op) => match op {
                     NormalOp::Nop => ast.push(0x00),
+                    NormalOp::Select => ast.push(0x05),
                     NormalOp::Br{has_arg, relative_depth} => {
                         ast.push(0x06);
                         ast.push(if has_arg { 1 } else { 0 });
@@ -423,8 +425,7 @@ impl FunctionBuilder {
                     NormalOp::Reinterpret(Type::Float32, Type::Int32) => ast.push(0xb4),
                     NormalOp::Reinterpret(Type::Int64, Type::Float64) => ast.push(0xb5),
                     _ => panic!("unhandled: {}", op)
-                },
-                _ => panic!("unhandled: {}", op)
+                }
             }
         }
 
