@@ -1,10 +1,10 @@
-use std::fmt;
+use std::{fmt, str};
 
+#[derive(Debug)]
 pub enum Sexpr {
-    String(String),
-    Identifier(String),
-    Number(String),
-    Variable(String),
+    String(Vec<u8>),
+    Identifier(Vec<u8>),
+    Variable(Vec<u8>),
     List(Vec<Sexpr>)
 }
 
@@ -14,11 +14,60 @@ struct Parser<'a> {
 }
 
 fn is_ws_char(ch: u8) -> bool {
-    ch == b' ' || ch == b'\n'
+    ch == b' ' || ch == b'\n' || ch == b'\t'
 }
 
 fn is_sep_char(ch: u8) -> bool {
     ch == b'(' || ch == b')' || is_ws_char(ch)
+}
+
+fn parse_hex_digit(ch: u8) -> u8 {
+    match ch {
+        b'0'...b'9' => ch - b'0',
+        b'a'...b'f' => ch - b'a' + 10,
+        b'A'...b'F' => ch - b'A' + 10,
+        _ => panic!(),
+    }
+}
+
+fn unescape(text: &[u8]) -> Vec<u8> {
+    let mut res = Vec::new();
+
+    enum State {
+        Start,
+        Esc,
+        One(u8),
+    }
+
+    let mut state = State::Start;
+
+    for ch in text {
+        match state {
+            State::Start => match *ch {
+                b'\\' => state = State::Esc,
+                _ => res.push(*ch),
+            },
+            State::Esc => match *ch {
+                b'0'...b'9' | b'a'...b'f' | b'A'...b'F' =>
+                    state = State::One(parse_hex_digit(*ch)),
+                b'n' => {
+                    res.push(b'\n');
+                    state = State::Start;
+                }
+                _ => panic!("unexpected escape {}", *ch),
+            },
+            State::One(val) => match *ch {
+                b'0'...b'9' | b'a'...b'f' | b'A'...b'F' => {
+                    let d = parse_hex_digit(*ch);
+                    res.push(d + (val << 4));
+                    state = State::Start;
+                }
+                _ => panic!("unexpected second escape {}", *ch),
+            },
+        }
+    }
+
+    res
 }
 
 impl<'a> Parser<'a> {
@@ -93,10 +142,10 @@ impl<'a> Parser<'a> {
                     }
                     len += 1;
                 }
-                let offset = self.pos;
+                let offset = self.pos + 1;
                 self.pos += len;
 
-                Sexpr::String(::std::str::from_utf8(&self.text[offset..self.pos]).unwrap().to_owned())
+                Sexpr::String(unescape(&self.text[offset..self.pos - 1]))
             }
             // x @ b'0'...b'9' => {
             //     let mut len = 1;
@@ -127,10 +176,10 @@ impl<'a> Parser<'a> {
                     }
                     len += 1;
                 }
-                let offset = self.pos;
+                let offset = self.pos + 1;
                 self.pos += len;
 
-                Sexpr::Variable(::std::str::from_utf8(&self.text[offset..self.pos]).unwrap().to_owned())
+                Sexpr::Variable(Vec::from(&self.text[offset..self.pos]))
             }
             x if !is_sep_char(x) => {
                 let mut len = 1;
@@ -143,7 +192,7 @@ impl<'a> Parser<'a> {
                 let offset = self.pos;
                 self.pos += len;
 
-                Sexpr::Identifier(::std::str::from_utf8(&self.text[offset..self.pos]).unwrap().to_owned())
+                Sexpr::Identifier(Vec::from(&self.text[offset..self.pos]))
             }
             _ => panic!()
         };
@@ -175,8 +224,7 @@ impl fmt::Display for Sexpr {
         match self {
             &Sexpr::String(ref text) |
             &Sexpr::Identifier(ref text) |
-            &Sexpr::Number(ref text) |
-            &Sexpr::Variable(ref text) => write!(f, "{}", text),
+            &Sexpr::Variable(ref text) => write!(f, "{}", str::from_utf8(text).unwrap_or("<bad utf8>")),
             &Sexpr::List(ref items) => {
                 try!(write!(f, "("));
                 for (i, s) in items.iter().enumerate() {

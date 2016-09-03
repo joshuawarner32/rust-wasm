@@ -1,4 +1,4 @@
-use std::{mem, str};
+use std::{mem, str, iter};
 use std::num::Wrapping;
 
 use module::{Module, FunctionIndex, AsBytes};
@@ -107,6 +107,20 @@ impl Memory {
 
 }
 
+#[test]
+fn test_store_load() {
+    let mut m = Memory(iter::repeat(0).take(1024).collect::<Vec<_>>());
+
+    for i in 0..10 {
+        m.store_u32(i*4, i as u32);
+        assert_eq!(m.load_u32(i*4), i as u32);
+    }
+    for i in 0..10 {
+        m.store_u64(i*4, i as u64);
+        assert_eq!(m.load_u64(i*4), i as u64);
+    }
+}
+
 pub struct Instance<'a, B: AsBytes + 'a> {
     pub memory: Memory,
     pub module: &'a Module<B>,
@@ -133,7 +147,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         for m in &module.memory_chunks {
             let data = m.data.as_bytes();
-            let newlen = ::std::cmp::min(m.offset + data.len(), memory.len());
+            let newlen = ::std::cmp::max(m.offset + data.len(), memory.len());
             memory.resize(newlen, 0);
             memory[m.offset..m.offset + data.len()].copy_from_slice(data);
         }
@@ -375,15 +389,15 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         Res::Value(Some(context.instance.memory.load_float(addr.to_u32(), floattype, memimm)))
                     }
                     &NormalOp::IntStore(inttype, size, memimm) => {
-                        let addr = context.stack.pop().unwrap().unwrap();
                         let value = context.stack.pop().unwrap().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
                         assert!(value.get_type() == inttype.to_type());
                         context.instance.memory.store_int(addr.to_u32(), value, size, memimm);
                         Res::Value(Some(value))
                     }
                     &NormalOp::FloatStore(floattype, memimm) => {
-                        let addr = context.stack.pop().unwrap().unwrap();
                         let value = context.stack.pop().unwrap().unwrap();
+                        let addr = context.stack.pop().unwrap().unwrap();
                         context.instance.memory.store_float(addr.to_u32(), value, floattype, memimm);
                         Res::Value(Some(value))
                     }

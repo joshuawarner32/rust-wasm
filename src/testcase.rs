@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::num::Wrapping;
 
 use sexpr::Sexpr;
-use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex, Names};
-use types::{Type, Dynamic, IntType, FloatType, Sign};
-use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp};
+use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex, Names, MemoryChunk};
+use types::{Type, Dynamic, IntType, FloatType, Sign, Size};
+use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp, MemImm};
 use interp::{Instance, InterpResult};
 use hexfloat;
 
@@ -56,7 +56,7 @@ macro_rules! vec_form {
     ($val:expr => ($ident:ident $($parts:tt)*) => $code:expr) => {{
         if $val.len() > 0 {
             if let &Sexpr::Identifier(ref name) = &$val[0] {
-                if name == stringify!($ident) {
+                if name.as_slice() == stringify!($ident).as_bytes() {
                     vec_form!($val[1..] => ($($parts)*) => $code)
                 } else {
                     None
@@ -89,13 +89,13 @@ macro_rules! sexpr_match {
 }
 
 pub struct Invoke {
-    function_name: String,
+    function_name: Vec<u8>,
     arguments: Vec<Dynamic>,
 }
 
 impl fmt::Display for Invoke {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        try!(write!(f, "{}(", self.function_name));
+        try!(write!(f, "{}(", str::from_utf8(&self.function_name).unwrap_or("<bad_utf8>")));
         for (i, a) in self.arguments.iter().enumerate() {
             try!(write!(f, "{}{}", if i == 0 { "" } else { ", " }, a));
         }
@@ -164,12 +164,12 @@ pub struct TestCase {
     modules: Vec<(Module<Vec<u8>>, Vec<Assert>)>
 }
 
-fn parse_type(text: &str) -> Type {
+fn parse_type(text: &[u8]) -> Type {
     match text {
-        "i32" => Type::Int32,
-        "i64" => Type::Int64,
-        "f32" => Type::Float32,
-        "f64" => Type::Float64,
+        b"i32" => Type::Int32,
+        b"i64" => Type::Int64,
+        b"f32" => Type::Float32,
+        b"f64" => Type::Float64,
         _ => panic!()
     }
 }
@@ -191,11 +191,11 @@ fn parse_invoke(s: &Sexpr) -> Invoke {
 fn parse_const(s: &Sexpr) -> Dynamic {
     sexpr_match!(s;
         (ident:&ty &value) => {
-            return match ty.as_str() {
-                "i32.const" => parse_int(value, IntType::Int32),
-                "i64.const" => parse_int(value, IntType::Int64),
-                "f32.const" => parse_float(value, FloatType::Float32),
-                "f64.const" => parse_float(value, FloatType::Float64),
+            return match ty.as_slice() {
+                b"i32.const" => parse_int(value, IntType::Int32),
+                b"i64.const" => parse_int(value, IntType::Int64),
+                b"f32.const" => parse_float(value, FloatType::Float32),
+                b"f64.const" => parse_float(value, FloatType::Float64),
                 _ => panic!()
             };
         };
@@ -255,7 +255,7 @@ impl TestCase {
                                 }
 
                                 if let Some(name) = name {
-                                    function_names.insert(name.as_str(), function_index);
+                                    function_names.insert(name.as_slice(), function_index);
                                 }
                                 function_index += 1;
                             };
@@ -287,11 +287,11 @@ impl TestCase {
                                             for a in args {
                                                 match a {
                                                     &Sexpr::Identifier(ref v) => {
-                                                        ctx.func.ty.param_types.push(parse_type(v.as_str()).to_u8());
+                                                        ctx.func.ty.param_types.push(parse_type(v.as_slice()).to_u8());
                                                         last_var = false;
                                                     }
                                                     &Sexpr::Variable(ref v) => {
-                                                        ctx.local_names.insert(v.as_str(), ctx.func.ty.param_types.len());
+                                                        ctx.local_names.insert(v.as_slice(), ctx.func.ty.param_types.len());
                                                         last_var = true;
                                                     }
                                                     _ => panic!()
@@ -301,19 +301,19 @@ impl TestCase {
                                         };
                                         (result &ty) => {
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                ctx.func.ty.return_type = Some(parse_type(v.as_str()));
+                                                ctx.func.ty.return_type = Some(parse_type(v.as_slice()));
                                             } else {
                                                 panic!("3");
                                             }
                                         };
                                         (local &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                ctx.local_names.insert(v.as_str(), ctx.func.ty.param_types.len() + ctx.func.local_types.len());
+                                                ctx.local_names.insert(v.as_slice(), ctx.func.ty.param_types.len() + ctx.func.local_types.len());
                                             } else {
                                                 panic!("4");
                                             }
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                ctx.func.local_types.push(parse_type(v.as_str()));
+                                                ctx.func.local_types.push(parse_type(v.as_slice()));
                                             } else {
                                                 panic!("5");
                                             }
@@ -321,7 +321,7 @@ impl TestCase {
                                         (local *args) => {
                                             for ty in args {
                                                 if let &Sexpr::Identifier(ref v) = ty {
-                                                    ctx.func.local_types.push(parse_type(v.as_str()));
+                                                    ctx.func.local_types.push(parse_type(v.as_slice()));
                                                 } else {
                                                     panic!("6");
                                                 }
@@ -342,7 +342,7 @@ impl TestCase {
                                         match name {
                                             &Sexpr::String(ref name) => {
                                                 m.exports.push(Export {
-                                                    function_index: FunctionIndex(*function_names.get(id.as_str()).unwrap()),
+                                                    function_index: FunctionIndex(*function_names.get(id.as_slice()).unwrap()),
                                                     function_name: Vec::from(name.as_bytes())
                                                 });
                                             }
@@ -365,22 +365,51 @@ impl TestCase {
                                 // println!("found type!");
                             };
                             (memory *args) => {
-                                // m.memory_info.initial_64k_pages = parse_int(initial);
-                                // m.memory_info.maximum_64k_pages = parse_int(max);
-                                //
-                                // assert!(m.memory_info.maximum_64k_pages >= m.memory_info.initial_64k_pages);
-                                //
-                                // for s in segments {
-                                //     sexpr_match!(s;
-                                //         (segment &offset &data) => {
-                                //             m.memory_chunks.push(MemoryChunk {
-                                //                 offset: parse_int(offset),
-                                //                 data: parse_bin_string(data),
-                                //             })
-                                //         };
-                                //         _ => panic!("a")
-                                //     );
-                                // }
+                                let i = 0;
+                                let i = if i < args.len() {
+                                    match &args[i] {
+                                        &Sexpr::Identifier(ref val) => {
+                                            m.memory_info.initial_64k_pages = usize::from_str(str::from_utf8(val.as_slice()).unwrap()).unwrap();
+                                            i + 1
+                                        }
+                                        _ => {
+                                            m.memory_info.initial_64k_pages = 1;
+                                            i
+                                        }
+                                    }
+                                } else {
+                                    m.memory_info.initial_64k_pages = 1;
+                                    i
+                                };
+                                let i = if i < args.len() {
+                                    match &args[i] {
+                                        &Sexpr::Identifier(ref val) => {
+                                            m.memory_info.maximum_64k_pages = usize::from_str(str::from_utf8(val.as_slice()).unwrap()).unwrap();
+                                            i + 1
+                                        }
+                                        _ => {
+                                            m.memory_info.maximum_64k_pages = 65536;
+                                            i
+                                        }
+                                    }
+                                } else {
+                                    m.memory_info.maximum_64k_pages = 65536;
+                                    i
+                                };
+
+                                assert!(m.memory_info.maximum_64k_pages >= m.memory_info.initial_64k_pages);
+
+                                for s in &args[i..] {
+                                    sexpr_match!(s;
+                                        (segment &offset &data) => {
+                                            m.memory_chunks.push(MemoryChunk {
+                                                offset:parse_int(offset, IntType::Int32).to_u32() as usize,
+                                                data: parse_bin_string(data),
+                                            })
+                                        };
+                                        _ => panic!("a")
+                                    );
+                                }
                             };
                             (table *items) => {
                                 // println!("found table!");
@@ -436,27 +465,32 @@ impl TestCase {
 }
 
 struct FunctionContext<'a> {
-    local_names: HashMap<&'a str, usize>,
+    local_names: HashMap<&'a [u8], usize>,
     func: FunctionBuilder,
-    function_names: &'a HashMap<&'a str, usize>,
-    label_names: Vec<&'a str>
+    function_names: &'a HashMap<&'a [u8], usize>,
+    label_names: Vec<&'a [u8]>
 }
 
 const EMPTY_DATA: &'static [u8] = &[];
 
+fn log2(data: u32) -> u32 {
+    assert!(data.count_ones() == 1);
+    data.trailing_zeros()
+}
+
 impl<'a> FunctionContext<'a> {
     fn read_local(&self, expr: &Sexpr) -> usize {
         match expr {
-            &Sexpr::Variable(ref name) => *self.local_names.get(name.as_str()).unwrap(),
-            &Sexpr::Identifier(ref num) => usize::from_str(num).unwrap(),
+            &Sexpr::Variable(ref name) => *self.local_names.get(name.as_bytes()).unwrap(),
+            &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
             _ => panic!("no local named {}", expr)
         }
     }
 
     fn read_function(&self, expr: &Sexpr) -> usize {
         match expr {
-            &Sexpr::Variable(ref name) => *self.function_names.get(name.as_str()).unwrap(),
-            &Sexpr::Identifier(ref num) => usize::from_str(num).unwrap(),
+            &Sexpr::Variable(ref name) => *self.function_names.get(name.as_bytes()).unwrap(),
+            &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
             _ => panic!("no function named {}", expr)
         }
     }
@@ -465,13 +499,13 @@ impl<'a> FunctionContext<'a> {
         match expr {
             &Sexpr::Variable(ref name) => {
                 for i in (0..self.label_names.len() - 1).rev() {
-                    if self.label_names[i] == name {
+                    if self.label_names[i] == name.as_slice() {
                         return i;
                     }
                 }
                 panic!("no label named {}", expr)
             }
-            &Sexpr::Identifier(ref num) => usize::from_str(num).unwrap(),
+            &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
             _ => panic!("no label named {}", expr)
         }
     }
@@ -489,15 +523,28 @@ impl<'a> FunctionContext<'a> {
         self.func.ops.push(LinearOp::Normal(op));
     }
 
+    fn parse_mem_imm(&mut self, exprs: &'a [Sexpr], count: usize) -> MemImm {
+        let (i, log_of_alignment) = match &exprs[0] {
+            &Sexpr::Identifier(ref text) if text.starts_with(b"align=") =>
+                (1, log2(u32::from_str(str::from_utf8(&text[b"align=".len()..]).unwrap()).unwrap())),
+            _ => (0, 1),
+        };
+        assert_eq!(self.parse_ops(&exprs[i..]), count);
+        MemImm {
+            log_of_alignment: log_of_alignment,
+            offset: 0
+        }
+    }
+
     fn parse_op(&mut self, s: &'a Sexpr) {
         sexpr_match!(s;
             (ident:&op *args) => {
-                match op.as_str() {
-                    "nop" => {self.push(NormalOp::Nop);},
-                    "block" => {
+                match op.as_slice() {
+                    b"nop" => {self.push(NormalOp::Nop);},
+                    b"block" => {
                         let (index, label_name) = if args.len() > 0 {
                             match &args[0] {
-                                &Sexpr::Variable(ref v) => (1, Some(v.as_str())),
+                                &Sexpr::Variable(ref v) => (1, Some(v.as_slice())),
                                 _ => (0, None)
                             }
                         } else {
@@ -514,10 +561,10 @@ impl<'a> FunctionContext<'a> {
                             self.label_names.pop().unwrap();
                         }
                     }
-                    "loop" => {
+                    b"loop" => {
                         let (index, label_name_begin) = if args.len() > 0 {
                             match &args[0] {
-                                &Sexpr::Variable(ref v) => (1, Some(v.as_str())),
+                                &Sexpr::Variable(ref v) => (1, Some(v.as_slice())),
                                 _ => (0, None)
                             }
                         } else {
@@ -526,7 +573,7 @@ impl<'a> FunctionContext<'a> {
 
                         let (index, label_name_end) = if index + 1 < args.len() {
                             match &args[0] {
-                                &Sexpr::Variable(ref v) => (index + 1, Some(v.as_str())),
+                                &Sexpr::Variable(ref v) => (index + 1, Some(v.as_slice())),
                                 _ => (index, None)
                             }
                         } else {
@@ -550,7 +597,7 @@ impl<'a> FunctionContext<'a> {
                             self.label_names.pop().unwrap();
                         }
                     }
-                    "if" => {
+                    b"if" => {
                         assert!(args.len() == 2 || args.len() == 3);
                         self.parse_op(&args[0]);
                         self.func.ops.push(LinearOp::If);
@@ -561,11 +608,11 @@ impl<'a> FunctionContext<'a> {
                         }
                         self.func.ops.push(LinearOp::End);
                     }
-                    "select" => {
+                    b"select" => {
                         assert!(self.parse_ops(args) == 3);
                         self.push(NormalOp::Select);
                     }
-                    "br" => {
+                    b"br" => {
                         let relative_depth = self.read_label(&args[0]);
 
                         if args.len() > 1 {
@@ -575,7 +622,7 @@ impl<'a> FunctionContext<'a> {
                             self.push(NormalOp::Br{has_arg: false, relative_depth: relative_depth as u32});
                         }
                     }
-                    "br_if" => {
+                    b"br_if" => {
                         let relative_depth = self.read_label(&args[0]);
                         self.parse_op(&args[1]);
 
@@ -586,7 +633,7 @@ impl<'a> FunctionContext<'a> {
                             self.push(NormalOp::BrIf{has_arg: false, relative_depth: relative_depth as u32});
                         }
                     }
-                    "br_table" => {
+                    b"br_table" => {
                         let relative_depth = self.read_label(&args[0]);
 
                         let mut i = 1;
@@ -608,567 +655,636 @@ impl<'a> FunctionContext<'a> {
                             self.push(NormalOp::BrTable{has_arg: false, target_data: &EMPTY_DATA, default: relative_depth as u32});
                         }
                     }
-                    "return" => {
+                    b"return" => {
                         let num = self.parse_ops(args);
                         assert!(num == 0 || num == 1);
                         self.push(NormalOp::Return{has_arg: num == 1});
                     }
-                    "unreachable" => {
+                    b"unreachable" => {
                         self.push(NormalOp::Unreachable);
                     }
                     // "drop" => { self.push(NormalOp::Nop); }
                     // "end" => { self.push(NormalOp::Nop); }
-                    "i32.const" |
-                    "i64.const" |
-                    "f64.const" |
-                    "f32.const" => {
+                    b"i32.const" |
+                    b"i64.const" |
+                    b"f64.const" |
+                    b"f32.const" => {
                         self.push(NormalOp::Const(parse_const(s)));
                     }
-                    "get_local" => {
+                    b"get_local" => {
                         assert_eq!(args.len(), 1);
                         let local = self.read_local(&args[0]);
                         self.push(NormalOp::GetLocal(local));
                     }
-                    "set_local" => {
+                    b"set_local" => {
                         assert_eq!(self.parse_ops(&args[1..]), 1);
                         assert_eq!(args.len(), 2);
                         let local = self.read_local(&args[0]);
                         self.push(NormalOp::SetLocal(local));
                     }
-                    "tee_local" => {
+                    b"tee_local" => {
                         assert_eq!(self.parse_ops(&args[1..]), 1);
                         assert_eq!(args.len(), 2);
                         let local = self.read_local(&args[0]);
                         self.push(NormalOp::TeeLocal(local));
                     }
-                    "call" => {
+                    b"call" => {
                         let index = self.read_function(&args[0]);
                         let num = self.parse_ops(&args[1..]);
                         self.push(NormalOp::Call{argument_count: num as u32, index: FunctionIndex(index)});
                     }
                     // "callindirect" => { self.push(NormalOp::Nop); }
                     // "callimport" => { self.push(NormalOp::Nop); }
-                    // "i32.load8s" => { self.push(NormalOp::Nop); }
-                    // "i32.load8u" => { self.push(NormalOp::Nop); }
-                    // "i32.load16s" => { self.push(NormalOp::Nop); }
-                    // "i32.load16u" => { self.push(NormalOp::Nop); }
-                    // "i64.load8s" => { self.push(NormalOp::Nop); }
-                    // "i64.load8u" => { self.push(NormalOp::Nop); }
-                    // "i64.load16s" => { self.push(NormalOp::Nop); }
-                    // "i64.load16u" => { self.push(NormalOp::Nop); }
-                    // "i64.load32s" => { self.push(NormalOp::Nop); }
-                    // "i64.load32u" => { self.push(NormalOp::Nop); }
-                    // "i32.load" => { self.push(NormalOp::Nop); }
-                    // "i64.load" => { self.push(NormalOp::Nop); }
-                    // "f32.load" => { self.push(NormalOp::Nop); }
-                    // "f64.load" => { self.push(NormalOp::Nop); }
-                    // "i32.store8" => { self.push(NormalOp::Nop); }
-                    // "i32.store16" => { self.push(NormalOp::Nop); }
-                    // "i64.store8" => { self.push(NormalOp::Nop); }
-                    // "i64.store16" => { self.push(NormalOp::Nop); }
-                    // "i64.store32" => { self.push(NormalOp::Nop); }
-                    // "i32.store" => { self.push(NormalOp::Nop); }
-                    // "i64.store" => { self.push(NormalOp::Nop); }
-                    // "f32.store" => { self.push(NormalOp::Nop); }
-                    // "f64.store" => { self.push(NormalOp::Nop); }
+                    b"i32.load8_s" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I8, memimm));
+                    }
+                    b"i32.load8_u" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I8, memimm));
+                    }
+                    b"i32.load16_s" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I16, memimm));
+                    }
+                    b"i32.load16_u" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I16, memimm));
+                    }
+                    b"i64.load8_s" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I8, memimm));
+                    }
+                    b"i64.load8_u" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I8, memimm));
+                    }
+                    b"i64.load16_s" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I16, memimm));
+                    }
+                    b"i64.load16_u" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I16, memimm));
+                    }
+                    b"i64.load32_s" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I32, memimm));
+                    }
+                    b"i64.load32_u" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I32, memimm));
+                    }
+                    b"i32.load" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I32, memimm));
+                    }
+                    b"i64.load" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I64, memimm));
+                    }
+                    b"f32.load" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::FloatLoad(FloatType::Float32, memimm));
+                    }
+                    b"f64.load" => {
+                        let memimm = self.parse_mem_imm(args, 1);
+                        self.push(NormalOp::FloatLoad(FloatType::Float64, memimm));
+                    }
+                    b"i32.store8" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int32, Size::I8, memimm));
+                    }
+                    b"i32.store16" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int32, Size::I16, memimm));
+                    }
+                    b"i64.store8" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int64, Size::I8, memimm));
+                    }
+                    b"i64.store16" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int64, Size::I16, memimm));
+                    }
+                    b"i64.store32" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int64, Size::I32, memimm));
+                    }
+                    b"i32.store" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int32, Size::I32, memimm));
+                    }
+                    b"i64.store" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::IntStore(IntType::Int64, Size::I64, memimm));
+                    }
+                    b"f32.store" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::FloatStore(FloatType::Float32, memimm));
+                    }
+                    b"f64.store" => {
+                        let memimm = self.parse_mem_imm(args, 2);
+                        self.push(NormalOp::FloatStore(FloatType::Float64, memimm));
+                    }
                     // "current_memory" => { self.push(NormalOp::Nop); }
                     // "grow_memory" => { self.push(NormalOp::Nop); }
-                    "i32.add" => {
+                    b"i32.add" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Add));
                     }
-                    "i32.sub" => {
+                    b"i32.sub" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Sub));
                     }
-                    "i32.mul" => {
+                    b"i32.mul" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Mul));
                     }
-                    "i32.div_s" => {
+                    b"i32.div_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::DivS));
                     }
-                    "i32.div_u" => {
+                    b"i32.div_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::DivU));
                     }
-                    "i32.rem_s" => {
+                    b"i32.rem_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::RemS));
                     }
-                    "i32.rem_u" => {
+                    b"i32.rem_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::RemU));
                     }
-                    "i32.and" => {
+                    b"i32.and" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::And));
                     }
-                    "i32.or" => {
+                    b"i32.or" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Or));
                     }
-                    "i32.xor" => {
+                    b"i32.xor" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Xor));
                     }
-                    "i32.shl" => {
+                    b"i32.shl" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Shl));
                     }
-                    "i32.shr_u" => {
+                    b"i32.shr_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::ShrU));
                     }
-                    "i32.shr_s" => {
+                    b"i32.shr_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::ShrS));
                     }
-                    "i32.rotr" => {
+                    b"i32.rotr" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Rotr));
                     }
-                    "i32.rotl" => {
+                    b"i32.rotl" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Rotl));
                     }
-                    "i32.eq" => {
+                    b"i32.eq" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::Eq));
                     }
-                    "i32.ne" => {
+                    b"i32.ne" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::Ne));
                     }
-                    "i32.lt_s" => {
+                    b"i32.lt_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtS));
                     }
-                    "i32.le_s" => {
+                    b"i32.le_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeS));
                     }
-                    "i32.lt_u" => {
+                    b"i32.lt_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LtU));
                     }
-                    "i32.le_u" => {
+                    b"i32.le_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::LeU));
                     }
-                    "i32.gt_s" => {
+                    b"i32.gt_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtS));
                     }
-                    "i32.ge_s" => {
+                    b"i32.ge_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeS));
                     }
-                    "i32.gt_u" => {
+                    b"i32.gt_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GtU));
                     }
-                    "i32.ge_u" => {
+                    b"i32.ge_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int32, IntCmpOp::GeU));
                     }
-                    "i32.clz" => {
+                    b"i32.clz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Clz));
                     }
-                    "i32.ctz" => {
+                    b"i32.ctz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Ctz));
                     }
-                    "i32.popcnt" => {
+                    b"i32.popcnt" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int32, IntUnOp::Popcnt));
                     }
-                    "i32.eqz" => {
+                    b"i32.eqz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntEqz(IntType::Int32));
                     }
-                    "i64.add" => {
+                    b"i64.add" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Add));
                     }
-                    "i64.sub" => {
+                    b"i64.sub" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Sub));
                     }
-                    "i64.mul" => {
+                    b"i64.mul" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Mul));
                     }
-                    "i64.div_s" => {
+                    b"i64.div_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::DivS));
                     }
-                    "i64.div_u" => {
+                    b"i64.div_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::DivU));
                     }
-                    "i64.rem_s" => {
+                    b"i64.rem_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::RemS));
                     }
-                    "i64.rem_u" => {
+                    b"i64.rem_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::RemU));
                     }
-                    "i64.and" => {
+                    b"i64.and" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::And));
                     }
-                    "i64.or" => {
+                    b"i64.or" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Or));
                     }
-                    "i64.xor" => {
+                    b"i64.xor" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Xor));
                     }
-                    "i64.shl" => {
+                    b"i64.shl" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Shl));
                     }
-                    "i64.shr_u" => {
+                    b"i64.shr_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::ShrU));
                     }
-                    "i64.shr_s" => {
+                    b"i64.shr_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::ShrS));
                     }
-                    "i64.rotr" => {
+                    b"i64.rotr" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Rotr));
                     }
-                    "i64.rotl" => {
+                    b"i64.rotl" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int64, IntBinOp::Rotl));
                     }
-                    "i64.eq" => {
+                    b"i64.eq" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::Eq));
                     }
-                    "i64.ne" => {
+                    b"i64.ne" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::Ne));
                     }
-                    "i64.lt_s" => {
+                    b"i64.lt_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtS));
                     }
-                    "i64.le_s" => {
+                    b"i64.le_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeS));
                     }
-                    "i64.lt_u" => {
+                    b"i64.lt_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LtU));
                     }
-                    "i64.le_u" => {
+                    b"i64.le_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::LeU));
                     }
-                    "i64.gt_s" => {
+                    b"i64.gt_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtS));
                     }
-                    "i64.ge_s" => {
+                    b"i64.ge_s" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeS));
                     }
-                    "i64.gt_u" => {
+                    b"i64.gt_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GtU));
                     }
-                    "i64.ge_u" => {
+                    b"i64.ge_u" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntCmp(IntType::Int64, IntCmpOp::GeU));
                     }
-                    "i64.clz" => {
+                    b"i64.clz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Clz));
                     }
-                    "i64.ctz" => {
+                    b"i64.ctz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Ctz));
                     }
-                    "i64.popcnt" => {
+                    b"i64.popcnt" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntUn(IntType::Int64, IntUnOp::Popcnt));
                     }
-                    "i64.eqz" => {
+                    b"i64.eqz" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntEqz(IntType::Int64));
                     }
-                    "f32.add" => {
+                    b"f32.add" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Add));
                     }
-                    "f32.sub" => {
+                    b"f32.sub" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Sub));
                     }
-                    "f32.mul" => {
+                    b"f32.mul" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Mul));
                     }
-                    "f32.div" => {
+                    b"f32.div" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Div));
                     }
-                    "f32.min" => {
+                    b"f32.min" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Min));
                     }
-                    "f32.max" => {
+                    b"f32.max" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Max));
                     }
-                    "f32.copysign" => {
+                    b"f32.copysign" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float32, FloatBinOp::Copysign));
                     }
-                    "f32.abs" => {
+                    b"f32.abs" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Abs));
                     }
-                    "f32.neg" => {
+                    b"f32.neg" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Neg));
                     }
-                    "f32.ceil" => {
+                    b"f32.ceil" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Ceil));
                     }
-                    "f32.floor" => {
+                    b"f32.floor" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Floor));
                     }
-                    "f32.trunc" => {
+                    b"f32.trunc" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Trunc));
                     }
-                    "f32.nearest" => {
+                    b"f32.nearest" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Nearest));
                     }
-                    "f32.sqrt" => {
+                    b"f32.sqrt" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float32, FloatUnOp::Sqrt));
                     }
-                    "f32.eq" => {
+                    b"f32.eq" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Eq));
                     }
-                    "f32.ne" => {
+                    b"f32.ne" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ne));
                     }
-                    "f32.lt" => {
+                    b"f32.lt" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Lt));
                     }
-                    "f32.le" => {
+                    b"f32.le" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Le));
                     }
-                    "f32.gt" => {
+                    b"f32.gt" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Gt));
                     }
-                    "f32.ge" => {
+                    b"f32.ge" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float32, FloatCmpOp::Ge));
                     }
-                    "f64.add" => {
+                    b"f64.add" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Add));
                     }
-                    "f64.sub" => {
+                    b"f64.sub" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Sub));
                     }
-                    "f64.mul" => {
+                    b"f64.mul" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Mul));
                     }
-                    "f64.div" => {
+                    b"f64.div" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Div));
                     }
-                    "f64.min" => {
+                    b"f64.min" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Min));
                     }
-                    "f64.max" => {
+                    b"f64.max" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Max));
                     }
-                    "f64.copysign" => {
+                    b"f64.copysign" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatBin(FloatType::Float64, FloatBinOp::Copysign));
                     }
-                    "f64.abs" => {
+                    b"f64.abs" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Abs));
                     }
-                    "f64.neg" => {
+                    b"f64.neg" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Neg));
                     }
-                    "f64.ceil" => {
+                    b"f64.ceil" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Ceil));
                     }
-                    "f64.floor" => {
+                    b"f64.floor" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Floor));
                     }
-                    "f64.trunc" => {
+                    b"f64.trunc" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Trunc));
                     }
-                    "f64.nearest" => {
+                    b"f64.nearest" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Nearest));
                     }
-                    "f64.sqrt" => {
+                    b"f64.sqrt" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatUn(FloatType::Float64, FloatUnOp::Sqrt));
                     }
-                    "f64.eq" => {
+                    b"f64.eq" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Eq));
                     }
-                    "f64.ne" => {
+                    b"f64.ne" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ne));
                     }
-                    "f64.lt" => {
+                    b"f64.lt" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Lt));
                     }
-                    "f64.le" => {
+                    b"f64.le" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Le));
                     }
-                    "f64.gt" => {
+                    b"f64.gt" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Gt));
                     }
-                    "f64.ge" => {
+                    b"f64.ge" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::FloatCmp(FloatType::Float64, FloatCmpOp::Ge));
                     }
-                    "i32.trunc_s/f32" => {
+                    b"i32.trunc_s/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Signed));
                     }
-                    "i32.trunc_s/f64" => {
+                    b"i32.trunc_s/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Signed));
                     }
-                    "i32.trunc_u/f32" => {
+                    b"i32.trunc_u/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int32, Sign::Unsigned));
                     }
-                    "i32.trunc_u/f64" => {
+                    b"i32.trunc_u/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int32, Sign::Unsigned));
                     }
-                    "i32.wrap/i64" => {
+                    b"i32.wrap/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntTruncate);
                     }
-                    "i64.trunc_s/f32" => {
+                    b"i64.trunc_s/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Signed));
                     }
-                    "i64.trunc_s/f64" => {
+                    b"i64.trunc_s/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Signed));
                     }
-                    "i64.trunc_u/f32" => {
+                    b"i64.trunc_u/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float32, IntType::Int64, Sign::Unsigned));
                     }
-                    "i64.trunc_u/f64" => {
+                    b"i64.trunc_u/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatToInt(FloatType::Float64, IntType::Int64, Sign::Unsigned));
                     }
-                    "i64.extend_s/i32" => {
+                    b"i64.extend_s/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntExtend(Sign::Signed));
                     }
-                    "i64.extend_u/i32" => {
+                    b"i64.extend_u/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntExtend(Sign::Unsigned));
                     }
-                    "f32.convert_s/i32" => {
+                    b"f32.convert_s/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float32));
                     }
-                    "f32.convert_u/i32" => {
+                    b"f32.convert_u/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float32));
                     }
-                    "f32.convert_s/i64" => {
+                    b"f32.convert_s/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float32));
                     }
-                    "f32.convert_u/i64" => {
+                    b"f32.convert_u/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float32));
                     }
-                    "f32.demote/f64" => {
+                    b"f32.demote/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatConvert(FloatType::Float32));
                     }
-                    "f32.reinterpret/i32" => {
+                    b"f32.reinterpret/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::Reinterpret(Type::Int32, Type::Float32));
                     }
-                    "f64.convert_s/i32" => {
+                    b"f64.convert_s/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int32, Sign::Signed, FloatType::Float64));
                     }
-                    "f64.convert_u/i32" => {
+                    b"f64.convert_u/i32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int32, Sign::Unsigned, FloatType::Float64));
                     }
-                    "f64.convert_s/i64" => {
+                    b"f64.convert_s/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int64, Sign::Signed, FloatType::Float64));
                     }
-                    "f64.convert_u/i64" => {
+                    b"f64.convert_u/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::IntToFloat(IntType::Int64, Sign::Unsigned, FloatType::Float64));
                     }
-                    "f64.promote/f32" => {
+                    b"f64.promote/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::FloatConvert(FloatType::Float64));
                     }
-                    "f64.reinterpret/i64" => {
+                    b"f64.reinterpret/i64" => {
                         assert_eq!(self.parse_ops(args), 1);
-                        self.push(NormalOp::Reinterpret(Type::Float64, Type::Int64));
+                        self.push(NormalOp::Reinterpret(Type::Int64, Type::Float64));
                     }
-                    "i32.reinterpret/f32" => {
+                    b"i32.reinterpret/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
-                        self.push(NormalOp::Reinterpret(Type::Float32, Type::Int32));
+                        self.push(NormalOp::Reinterpret(Type::Int32, Type::Float32));
                     }
-                    "i64.reinterpret/f64" => {
+                    b"i64.reinterpret/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
-                        self.push(NormalOp::Reinterpret(Type::Float64, Type::Int64));
+                        self.push(NormalOp::Reinterpret(Type::Int64, Type::Float64));
                     }
-                    _ => panic!("unexpected instr: {}", op)
+                    _ => panic!("unexpected instr: {:?}", s)
                 };
             };
-            _ => panic!("unexpected instr: {}", s)
+            _ => panic!("unexpected instr: {:?}", s)
         );
     }
 }
@@ -1176,28 +1292,28 @@ impl<'a> FunctionContext<'a> {
 fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
-            println!("parsing int {}", text);
+            // println!("parsing int {}", text);
             match ty {
                 IntType::Int32 => {
-                    if text.starts_with("-0x") {
-                        Dynamic::Int32(!Wrapping(u32::from_str_radix(&text[3..], 16).unwrap()) + Wrapping(1))
-                    } else if text.starts_with("-") {
-                        Dynamic::from_i32(i32::from_str_radix(text, 10).unwrap())
-                    } else if text.starts_with("0x") {
-                        Dynamic::from_u32(u32::from_str_radix(&text[2..], 16).unwrap())
+                    if text.starts_with(b"-0x") {
+                        Dynamic::Int32(!Wrapping(u32::from_str_radix(str::from_utf8(&text[3..]).unwrap(), 16).unwrap()) + Wrapping(1))
+                    } else if text.starts_with(b"-") {
+                        Dynamic::from_i32(i32::from_str_radix(str::from_utf8(text).unwrap(), 10).unwrap())
+                    } else if text.starts_with(b"0x") {
+                        Dynamic::from_u32(u32::from_str_radix(str::from_utf8(&text[2..]).unwrap(), 16).unwrap())
                     } else {
-                        Dynamic::from_u32(u32::from_str_radix(text, 10).unwrap())
+                        Dynamic::from_u32(u32::from_str_radix(str::from_utf8(text).unwrap(), 10).unwrap())
                     }
                 }
                 IntType::Int64 => {
-                    if text.starts_with("-0x") {
-                        Dynamic::Int64(!Wrapping(u64::from_str_radix(&text[3..], 16).unwrap()) + Wrapping(1))
-                    } else if text.starts_with("-") {
-                        Dynamic::from_i64(i64::from_str_radix(text, 10).unwrap())
-                    } else if text.starts_with("0x") {
-                        Dynamic::from_u64(u64::from_str_radix(&text[2..], 16).unwrap())
+                    if text.starts_with(b"-0x") {
+                        Dynamic::Int64(!Wrapping(u64::from_str_radix(str::from_utf8(&text[3..]).unwrap(), 16).unwrap()) + Wrapping(1))
+                    } else if text.starts_with(b"-") {
+                        Dynamic::from_i64(i64::from_str_radix(str::from_utf8(text).unwrap(), 10).unwrap())
+                    } else if text.starts_with(b"0x") {
+                        Dynamic::from_u64(u64::from_str_radix(str::from_utf8(&text[2..]).unwrap(), 16).unwrap())
                     } else {
-                        Dynamic::from_u64(u64::from_str_radix(text, 10).unwrap())
+                        Dynamic::from_u64(u64::from_str_radix(str::from_utf8(text).unwrap(), 10).unwrap())
                     }
                 }
             }
@@ -1209,24 +1325,24 @@ fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
 fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
-            println!("parsing {}", text);
+            // println!("parsing {}", text);
 
-            let mut text = text.as_str();
-            let neg = if text.starts_with("-") {
+            let mut text = text.as_slice();
+            let neg = if text.starts_with(b"-") {
                 text = &text[1..];
                 true
             } else {
                 false
             };
 
-            let mut res = if text.starts_with("0x") {
-                unsafe { mem::transmute(hexfloat::parse_bits_64(text)) }
-            } else if text == "infinity" {
+            let mut res = if text.starts_with(b"0x") {
+                unsafe { mem::transmute(hexfloat::parse_bits_64(str::from_utf8(text).unwrap())) }
+            } else if text == b"infinity" {
                 f64::INFINITY
-            } else if text == "nan" {
+            } else if text == b"nan" {
                 f64::NAN
             } else {
-                f64::from_str(text).unwrap()
+                f64::from_str(str::from_utf8(text).unwrap()).unwrap()
             };
 
             if neg {
@@ -1244,28 +1360,7 @@ fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
 
 fn parse_bin_string(node: &Sexpr) -> Vec<u8> {
     match node {
-        &Sexpr::String(ref text) => {
-            let text = text.as_bytes();
-            let mut res = Vec::new();
-
-            assert!(text[0] == b'"');
-
-            let mut pos = 1;
-
-            while pos < text.len() {
-                match text[pos] {
-                    b'\\' => {
-                        assert!(pos + 2 < text.len());
-                        res.push(u8::from_str_radix(str::from_utf8(&text[pos + 1..pos + 2]).unwrap(), 16).unwrap());
-                    }
-                    b'"' => break,
-                    ch => res.push(ch)
-                }
-                pos += 1;
-            }
-
-            res
-        }
+        &Sexpr::String(ref text) => Vec::from(text.as_bytes()),
         _ => panic!()
     }
 }

@@ -1,10 +1,10 @@
 use std::{str, mem, fmt};
 
-use types::{Type, Pr, IntType, FloatType, Sign, Dynamic};
+use types::{Type, Pr, IntType, FloatType, Sign, Dynamic, Size};
 use reader::Reader;
 use ops::{LinearOp, NormalOp, LinearOpReader, BlockOpReader,
     IntBinOp, IntCmpOp, IntUnOp,
-    FloatBinOp, FloatCmpOp, FloatUnOp};
+    FloatBinOp, FloatCmpOp, FloatUnOp, MemImm};
 
 struct Chunk<'a> {
     name: &'a [u8],
@@ -204,6 +204,10 @@ fn write_u64(ast: &mut Vec<u8>, v: u64) {
     ast.push(((v >> (4+3)*8) & 0xff) as u8);
 }
 
+fn write_mem_imm(ast: &mut Vec<u8>, imm: MemImm) {
+    write_var_u32(ast, imm.log_of_alignment);
+    write_var_u32(ast, imm.offset);
+}
 
 impl FunctionBuilder {
     pub fn new() -> FunctionBuilder {
@@ -300,6 +304,98 @@ impl FunctionBuilder {
                         ast.push(0x16);
                         write_var_u32(&mut ast, argument_count);
                         write_var_u32(&mut ast, index.0 as u32);
+                    }
+                    NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I8, memimm) => {
+                        ast.push(0x20);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I8, memimm) => {
+                        ast.push(0x21);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I16, memimm) => {
+                        ast.push(0x22);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I16, memimm) => {
+                        ast.push(0x23);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I8, memimm) => {
+                        ast.push(0x24);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I8, memimm) => {
+                        ast.push(0x25);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I16, memimm) => {
+                        ast.push(0x26);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I16, memimm) => {
+                        ast.push(0x27);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Signed, Size::I32, memimm) => {
+                        ast.push(0x28);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I32, memimm) => {
+                        ast.push(0x29);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int32, Sign::Unsigned, Size::I32, memimm) => {
+                        ast.push(0x2a);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntLoad(IntType::Int64, Sign::Unsigned, Size::I64, memimm) => {
+                        ast.push(0x2b);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::FloatLoad(FloatType::Float32, memimm) => {
+                        ast.push(0x2c);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::FloatLoad(FloatType::Float64, memimm) => {
+                        ast.push(0x2d);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int32, Size::I8, memimm) => {
+                        ast.push(0x2e);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int32, Size::I16, memimm) => {
+                        ast.push(0x2f);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int64, Size::I8, memimm) => {
+                        ast.push(0x30);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int64, Size::I16, memimm) => {
+                        ast.push(0x31);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int64, Size::I32, memimm) => {
+                        ast.push(0x32);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int32, Size::I32, memimm) => {
+                        ast.push(0x33);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::IntStore(IntType::Int64, Size::I64, memimm) => {
+                        ast.push(0x34);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::FloatStore(FloatType::Float32, memimm) => {
+                        ast.push(0x35);
+                        write_mem_imm(&mut ast, memimm);
+                    }
+                    NormalOp::FloatStore(FloatType::Float64, memimm) => {
+                        ast.push(0x36);
+                        write_mem_imm(&mut ast, memimm);
                     }
                     NormalOp::IntBin(IntType::Int32, IntBinOp::Add) => ast.push(0x40),
                     NormalOp::IntBin(IntType::Int32, IntBinOp::Sub) => ast.push(0x41),
