@@ -43,6 +43,9 @@ pub struct TableIndex(pub usize);
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct ImportIndex(pub usize);
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct ExportIndex(pub usize);
+
 #[derive(Copy, Clone)]
 pub struct FunctionType<B: AsBytes> {
     pub param_types: B,
@@ -302,6 +305,16 @@ impl FunctionBuilder {
                     }
                     NormalOp::Call{argument_count, index} => {
                         ast.push(0x16);
+                        write_var_u32(&mut ast, argument_count);
+                        write_var_u32(&mut ast, index.0 as u32);
+                    }
+                    NormalOp::CallIndirect{argument_count, index} => {
+                        ast.push(0x17);
+                        write_var_u32(&mut ast, argument_count);
+                        write_var_u32(&mut ast, index.0 as u32);
+                    }
+                    NormalOp::CallImport{argument_count, index} => {
+                        ast.push(0x18);
                         write_var_u32(&mut ast, argument_count);
                         write_var_u32(&mut ast, index.0 as u32);
                     }
@@ -568,6 +581,17 @@ impl<B: AsBytes> Module<B> {
             memory_chunks: Vec::new(),
             names: Vec::new(),
         }
+    }
+
+    pub fn find_export(&self, name: &[u8]) -> Option<ExportIndex> {
+        println!("looking for {}", str::from_utf8(name).unwrap());
+        for (i, e) in self.exports.iter().enumerate() {
+            println!("checking {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
+            if e.function_name.as_bytes() == name {
+                return Some(ExportIndex(i));
+            }
+        }
+        None
     }
 
     pub fn find(&self, name: &[u8]) -> Option<FunctionIndex> {

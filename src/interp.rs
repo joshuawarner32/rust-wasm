@@ -1,7 +1,8 @@
 use std::{mem, str, iter};
 use std::num::Wrapping;
+use std::collections::HashMap;
 
-use module::{Module, FunctionIndex, AsBytes};
+use module::{Module, FunctionIndex, ImportIndex, ExportIndex, AsBytes};
 use types::{Type, Dynamic, Sign, Size, IntType, FloatType};
 use ops::{
     BlockOp, Block, NormalOp, MemImm,
@@ -121,10 +122,17 @@ fn test_store_load() {
     }
 }
 
+pub trait BoundInstance {
+    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult;
+    fn export_by_name(&self, name: &[u8]) -> ExportIndex;
+}
+
 pub struct Instance<'a, B: AsBytes + 'a> {
     pub memory: Memory,
     pub module: &'a Module<B>,
     pub call_stack_depth: usize,
+    pub bound_imports: Vec<(usize, ExportIndex)>,
+    pub bound_instances: Vec<Box<BoundInstance>>,
 }
 
 fn read_u32(data: &[u8]) -> u32 {
@@ -140,8 +148,17 @@ pub enum InterpResult {
     Trap,
 }
 
+impl<'a, B: AsBytes> BoundInstance for Instance<'a, B> {
+    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
+        self.invoke(self.module.exports[func.0].function_index, args)
+    }
+    fn export_by_name(&self, name: &[u8]) -> ExportIndex {
+        self.module.find_export(name).unwrap()
+    }
+}
+
 impl<'a, B: AsBytes> Instance<'a, B> {
-    pub fn new(module: &'a Module<B>) -> Instance<'a, B> {
+    pub fn new(module: &'a Module<B>, imports: HashMap<&[u8], Box<BoundInstance>>) -> Instance<'a, B> {
         let mut memory = Vec::with_capacity(module.memory_info.initial_64k_pages * 64 * 1024);
         memory.resize(module.memory_info.initial_64k_pages * 64 * 1024, 0);
 
@@ -152,11 +169,33 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             memory[m.offset..m.offset + data.len()].copy_from_slice(data);
         }
 
+        let mut bound_instances = Vec::new();
+
+        let mut instance_indices = HashMap::new();
+
+        for (k, v) in imports {
+            instance_indices.insert(k, bound_instances.len());
+            bound_instances.push(v);
+        }
+
+        let mut bound_imports = module.imports.iter().map(|i| {
+            let instance_index = *instance_indices.get(i.module_name.as_bytes()).unwrap();
+            let export_index = bound_instances[instance_index].export_by_name(i.function_name.as_bytes());
+            (instance_index, export_index)
+        }).collect::<Vec<_>>();
+
         Instance {
             memory: Memory(memory),
             module: module,
             call_stack_depth: 0,
+            bound_imports: bound_imports,
+            bound_instances: bound_instances,
         }
+    }
+
+    pub fn invoke_import(&mut self, func: ImportIndex, args: &[Dynamic]) -> InterpResult {
+        let (module, index) = self.bound_imports[func.0];
+        self.bound_instances[module].invoke_export(index, args)
     }
 
     pub fn invoke(&mut self, func: FunctionIndex, args: &[Dynamic]) -> InterpResult {
@@ -378,7 +417,17 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         res
                     }
                     &NormalOp::CallImport{argument_count, index} => {
-                        panic!();
+                        let stack_len = context.stack.len();
+                        let res = {
+                            let args = context.stack[stack_len - argument_count as usize..]
+                                .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
+                            match context.instance.invoke_import(index, &args) {
+                                InterpResult::Value(v) => Res::Value(v),
+                                InterpResult::Trap => return Res::Trap,
+                            }
+                        };
+                        context.stack.drain(stack_len - argument_count as usize..);
+                        res
                     }
                     &NormalOp::IntLoad(inttype, sign, size, memimm) => {
                         let addr = context.stack.pop().unwrap().unwrap();

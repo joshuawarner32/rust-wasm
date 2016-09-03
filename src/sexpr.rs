@@ -54,6 +54,14 @@ fn unescape(text: &[u8]) -> Vec<u8> {
                     res.push(b'\n');
                     state = State::Start;
                 }
+                b'\\' => {
+                    res.push(b'\\');
+                    state = State::Start;
+                }
+                b'\"' => {
+                    res.push(b'\"');
+                    state = State::Start;
+                }
                 _ => panic!("unexpected escape {}", *ch),
             },
             State::One(val) => match *ch {

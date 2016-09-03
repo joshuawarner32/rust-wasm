@@ -4,10 +4,13 @@ use std::collections::HashMap;
 use std::num::Wrapping;
 
 use sexpr::Sexpr;
-use module::{AsBytes, Module, MemoryInfo, FunctionBuilder, Export, FunctionIndex, Names, MemoryChunk};
+use module::{AsBytes, Module, MemoryInfo, FunctionBuilder,
+    Export, FunctionIndex, ImportIndex, Names, MemoryChunk,
+    Import, FunctionType, ExportIndex};
 use types::{Type, Dynamic, IntType, FloatType, Sign, Size};
-use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp, FloatBinOp, FloatUnOp, FloatCmpOp, MemImm};
-use interp::{Instance, InterpResult};
+use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp,
+    FloatBinOp, FloatUnOp, FloatCmpOp, MemImm};
+use interp::{Instance, InterpResult, BoundInstance};
 use hexfloat;
 
 macro_rules! vec_form {
@@ -118,7 +121,8 @@ impl Invoke {
 pub enum Assert {
     Return(Invoke, Option<Dynamic>),
     ReturnNan(Invoke),
-    Trap(Invoke)
+    Trap(Invoke),
+    NoTrap(Invoke),
 }
 
 impl Assert {
@@ -156,6 +160,10 @@ impl Assert {
                 println!("testing {} traps", invoke);
                 assert_eq!(invoke.run(instance), InterpResult::Trap);
             }
+            &Assert::NoTrap(ref invoke) => {
+                println!("testing {} doesn't trap", invoke);
+                assert!(invoke.run(instance) != InterpResult::Trap);
+            }
         }
     }
 }
@@ -171,6 +179,13 @@ fn parse_type(text: &[u8]) -> Type {
         b"f32" => Type::Float32,
         b"f64" => Type::Float64,
         _ => panic!()
+    }
+}
+
+fn parse_type_expr(s: &Sexpr) -> Type {
+    match s {
+        &Sexpr::Identifier(ref text) => parse_type(text.as_slice()),
+        _ => panic!(),
     }
 }
 
@@ -218,6 +233,7 @@ impl TestCase {
 
                     let mut function_names = HashMap::new();
                     let mut function_index = 0;
+                    let mut import_names = HashMap::new();
 
                     for s in it {
                         sexpr_match!(s;
@@ -259,6 +275,21 @@ impl TestCase {
                                 }
                                 function_index += 1;
                             };
+                            (import &module &name &ty) => {
+                                m.imports.push(Import {
+                                    function_type: parse_function_ty(ty),
+                                    module_name: parse_name(module),
+                                    function_name: parse_name(name),
+                                });
+                            };
+                            (import &id &module &name &ty) => {
+                                import_names.insert(parse_var_id(id), m.imports.len());
+                                m.imports.push(Import {
+                                    function_type: parse_function_ty(ty),
+                                    module_name: parse_name(module),
+                                    function_name: parse_name(name),
+                                });
+                            };
                             _ => {}
                         );
                     }
@@ -272,6 +303,7 @@ impl TestCase {
                                     func: FunctionBuilder::new(),
                                     local_names: HashMap::new(),
                                     function_names: &function_names,
+                                    import_names: &import_names,
                                     label_names: Vec::new()
                                 };
 
@@ -337,26 +369,27 @@ impl TestCase {
                                 m.code.push(ctx.func.build());
                             };
                             (export &name &id) => {
-                                match id {
-                                    &Sexpr::Variable(ref id) => {
-                                        match name {
-                                            &Sexpr::String(ref name) => {
-                                                m.exports.push(Export {
-                                                    function_index: FunctionIndex(*function_names.get(id.as_slice()).unwrap()),
-                                                    function_name: Vec::from(name.as_bytes())
-                                                });
+                                match name {
+                                    &Sexpr::String(ref name) => {
+                                        let index = match id {
+                                            &Sexpr::Variable(ref id) => {
+                                                FunctionIndex(*function_names.get(id.as_slice()).unwrap())
+                                            }
+                                            &Sexpr::Identifier(ref id) => {
+                                                FunctionIndex(usize::from_str(str::from_utf8(id.as_slice()).unwrap()).unwrap())
                                             }
                                             _ => panic!("6")
-                                        }
+                                        };
+                                        m.exports.push(Export {
+                                            function_index: index,
+                                            function_name: Vec::from(name.as_bytes())
+                                        });
                                     }
                                     _ => panic!("7")
                                 }
                             };
-                            (import &module &name &ty) => {
-                                // println!("found import!");
-                            };
-                            (import &id &module &name &ty) => {
-                                // println!("found import!");
+                            (import *args) => {
+                                // already handled
                             };
                             (type &id &ty) => {
                                 // println!("found type!");
@@ -440,8 +473,8 @@ impl TestCase {
                 (assert_trap &invoke &text) => {
                     modules.last_mut().unwrap().1.push(Assert::Trap(parse_invoke(invoke)));
                 };
-                (invoke &ident *args) => {
-                    panic!("10");
+                (invoke *args) => {
+                    modules.last_mut().unwrap().1.push(Assert::NoTrap(parse_invoke(s)));
                 };
                 _ => {
                     panic!("unhandled: {}", s);
@@ -456,7 +489,9 @@ impl TestCase {
 
     pub fn run_all(&self) {
         for m in &self.modules {
-            let mut instance = Instance::new(&m.0);
+            let mut import_table = HashMap::new();
+            import_table.insert(&b"spectest"[..], Box::new(SpecTestModule) as Box<BoundInstance>);
+            let mut instance = Instance::new(&m.0, import_table);
             for assert in &m.1 {
                 assert.run(&mut instance);
             }
@@ -464,10 +499,25 @@ impl TestCase {
     }
 }
 
+struct SpecTestModule;
+
+impl BoundInstance for SpecTestModule {
+    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
+        assert_eq!(func.0, 0);
+        println!("print: {}", args[0].to_u32());
+        InterpResult::Value(None)
+    }
+    fn export_by_name(&self, name: &[u8]) -> ExportIndex {
+        assert_eq!(name, b"print");
+        ExportIndex(0)
+    }
+}
+
 struct FunctionContext<'a> {
     local_names: HashMap<&'a [u8], usize>,
     func: FunctionBuilder,
     function_names: &'a HashMap<&'a [u8], usize>,
+    import_names: &'a HashMap<&'a [u8], usize>,
     label_names: Vec<&'a [u8]>
 }
 
@@ -492,6 +542,14 @@ impl<'a> FunctionContext<'a> {
             &Sexpr::Variable(ref name) => *self.function_names.get(name.as_bytes()).unwrap(),
             &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
             _ => panic!("no function named {}", expr)
+        }
+    }
+
+    fn read_import(&self, expr: &Sexpr) -> usize {
+        match expr {
+            &Sexpr::Variable(ref name) => *self.import_names.get(name.as_bytes()).unwrap(),
+            &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
+            _ => panic!("no import named {}", expr)
         }
     }
 
@@ -694,7 +752,11 @@ impl<'a> FunctionContext<'a> {
                         self.push(NormalOp::Call{argument_count: num as u32, index: FunctionIndex(index)});
                     }
                     // "callindirect" => { self.push(NormalOp::Nop); }
-                    // "callimport" => { self.push(NormalOp::Nop); }
+                    b"call_import" => {
+                        let index = self.read_import(&args[0]);
+                        let num = self.parse_ops(&args[1..]);
+                        self.push(NormalOp::CallImport{argument_count: num as u32, index: ImportIndex(index)});
+                    }
                     b"i32.load8_s" => {
                         let memimm = self.parse_mem_imm(args, 1);
                         self.push(NormalOp::IntLoad(IntType::Int32, Sign::Signed, Size::I8, memimm));
@@ -1281,10 +1343,10 @@ impl<'a> FunctionContext<'a> {
                         assert_eq!(self.parse_ops(args), 1);
                         self.push(NormalOp::Reinterpret(Type::Int64, Type::Float64));
                     }
-                    _ => panic!("unexpected instr: {:?}", s)
+                    _ => panic!("unexpected instr: {}", s)
                 };
             };
-            _ => panic!("unexpected instr: {:?}", s)
+            _ => panic!("unexpected instr: {}", s)
         );
     }
 }
@@ -1363,4 +1425,35 @@ fn parse_bin_string(node: &Sexpr) -> Vec<u8> {
         &Sexpr::String(ref text) => Vec::from(text.as_bytes()),
         _ => panic!()
     }
+}
+
+fn parse_name(node: &Sexpr) -> Vec<u8> {
+    match node {
+        &Sexpr::String(ref text) => text.clone(),
+        _ => panic!("bad name: {:?}", node),
+    }
+}
+
+fn parse_var_id(node: &Sexpr) -> &[u8] {
+    match node {
+        &Sexpr::Variable(ref text) => text.as_slice(),
+        _ => panic!("bad var: {:?}", node),
+    }
+}
+
+fn parse_function_ty(node: &Sexpr) -> FunctionType<Vec<u8>> {
+    let mut ty = FunctionType {
+        param_types: Vec::new(),
+        return_type: None
+    };
+
+    sexpr_match!(node;
+        (param *params) => {
+            for p in params {
+                ty.param_types.push(parse_type_expr(p).to_u8());
+            }
+        };
+        _ => panic!()
+    );
+    ty
 }
