@@ -35,6 +35,9 @@ fn read_chunk<'a>(reader: &mut Reader<'a>) -> Chunk<'a> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
+pub struct TypeIndex(pub usize);
+
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct FunctionIndex(pub usize);
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -51,6 +54,15 @@ pub struct FunctionType<B: AsBytes> {
     pub param_types: B,
     pub return_type: Option<Type>
 }
+
+impl<B: AsBytes> PartialEq for FunctionType<B> {
+    fn eq(&self, other: &FunctionType<B>) -> bool {
+        self.param_types.as_bytes() == other.param_types.as_bytes() &&
+            self.return_type == other.return_type
+    }
+}
+
+impl<B: AsBytes> Eq for FunctionType<B> {}
 
 impl<B: AsBytes> fmt::Display for FunctionType<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -72,7 +84,7 @@ fn test_fn_ty_display() {
 }
 
 pub struct Import<B: AsBytes> {
-    pub function_type: FunctionType<B>,
+    pub function_type: TypeIndex,
     pub module_name: B,
     pub function_name: B,
 }
@@ -113,9 +125,9 @@ pub struct Names<B: AsBytes> {
 }
 
 pub struct Module<B: AsBytes> {
-    types: Vec<FunctionType<B>>,
+    pub types: Vec<FunctionType<B>>,
     pub imports: Vec<Import<B>>,
-    pub functions: Vec<FunctionType<B>>,
+    pub functions: Vec<TypeIndex>,
     pub table: Vec<FunctionIndex>,
     pub memory_info: MemoryInfo,
     pub start_function_index: Option<FunctionIndex>,
@@ -126,7 +138,7 @@ pub struct Module<B: AsBytes> {
 }
 
 pub struct FunctionBuilder {
-    pub ty: FunctionType<Vec<u8>>,
+    pub ty_index: Option<TypeIndex>,
     pub ops: Vec<LinearOp<'static>>,
     pub local_types: Vec<Type>,
 }
@@ -215,10 +227,7 @@ fn write_mem_imm(ast: &mut Vec<u8>, imm: MemImm) {
 impl FunctionBuilder {
     pub fn new() -> FunctionBuilder {
         FunctionBuilder {
-            ty: FunctionType {
-                param_types: Vec::new(),
-                return_type: None,
-            },
+            ty_index: None,
             ops: Vec::new(),
             local_types: Vec::new(),
         }
@@ -683,8 +692,10 @@ impl<'a> Module<&'a [u8]> {
                         let mut ims = Vec::with_capacity(count);
 
                         for _ in 0..count {
+                            let ty = r.read_var_u32() as usize;
+                            assert!(ty < tys.len());
                             ims.push(Import {
-                                function_type: tys[r.read_var_u32() as usize],
+                                function_type: TypeIndex(ty),
                                 module_name: r.read_bytes(),
                                 function_name: r.read_bytes()
                             });
@@ -704,7 +715,9 @@ impl<'a> Module<&'a [u8]> {
                         let mut fns = Vec::with_capacity(count);
 
                         for _ in 0..count {
-                            fns.push(tys[r.read_var_u32() as usize]);
+                            let ty = r.read_var_u32() as usize;
+                            assert!(ty < tys.len());
+                            fns.push(TypeIndex(ty));
                         }
                         functions = Some(fns);
                     } else {

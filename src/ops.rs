@@ -2,7 +2,7 @@ use std::iter::{Iterator, IntoIterator};
 use std::{mem, fmt};
 
 use types::{Dynamic, Type, NoType, IntType, FloatType, Size, Sign};
-use module::{FunctionIndex, TableIndex, ImportIndex};
+use module::{FunctionIndex, TableIndex, ImportIndex, TypeIndex};
 use reader::Reader;
 
 // #[derive(Copy, Clone)]
@@ -281,7 +281,7 @@ pub enum NormalOp<'a> {
     SetLocal(usize),
     TeeLocal(usize),
     Call{argument_count: u32, index: FunctionIndex},
-    CallIndirect{argument_count: u32, index: TableIndex},
+    CallIndirect{argument_count: u32, index: TypeIndex},
     CallImport{argument_count: u32, index: ImportIndex},
     IntLoad(IntType, Sign, Size, MemImm),
     FloatLoad(FloatType, MemImm),
@@ -612,7 +612,7 @@ fn read_linear_op<'a>(r: &mut Reader<'a>) -> Option<LinearOp<'a>> {
                     let index = r.read_var_u32() as usize;
                     NormalOp::CallIndirect{
                         argument_count: argument_count,
-                        index: TableIndex(index)
+                        index: TypeIndex(index)
                     }
                 }
                 0x18 => {

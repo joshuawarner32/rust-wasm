@@ -6,7 +6,7 @@ use std::num::Wrapping;
 use sexpr::Sexpr;
 use module::{AsBytes, Module, MemoryInfo, FunctionBuilder,
     Export, FunctionIndex, ImportIndex, Names, MemoryChunk,
-    Import, FunctionType, ExportIndex};
+    Import, FunctionType, ExportIndex, TableIndex, TypeIndex};
 use types::{Type, Dynamic, IntType, FloatType, Sign, Size};
 use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp,
     FloatBinOp, FloatUnOp, FloatCmpOp, MemImm};
@@ -235,6 +235,8 @@ impl TestCase {
                     let mut function_index = 0;
                     let mut import_names = HashMap::new();
 
+                    let mut type_names = HashMap::new();
+
                     for s in it {
                         sexpr_match!(s;
                             (func *it) => {
@@ -277,7 +279,7 @@ impl TestCase {
                             };
                             (import &module &name &ty) => {
                                 m.imports.push(Import {
-                                    function_type: parse_function_ty(ty),
+                                    function_type: parse_function_ty(&type_names, &mut m.types, ty),
                                     module_name: parse_name(module),
                                     function_name: parse_name(name),
                                 });
@@ -285,10 +287,17 @@ impl TestCase {
                             (import &id &module &name &ty) => {
                                 import_names.insert(parse_var_id(id), m.imports.len());
                                 m.imports.push(Import {
-                                    function_type: parse_function_ty(ty),
+                                    function_type: parse_function_ty(&type_names, &mut m.types, ty),
                                     module_name: parse_name(module),
                                     function_name: parse_name(name),
                                 });
+                            };
+                            (type &id &ty) => {
+                                type_names.insert(parse_var_id(id), m.types.len());
+                                m.types.push(parse_type_signature(ty));
+                            };
+                            (type &ty) => {
+                                m.types.push(parse_type_signature(ty));
                             };
                             _ => {}
                         );
@@ -304,8 +313,15 @@ impl TestCase {
                                     local_names: HashMap::new(),
                                     function_names: &function_names,
                                     import_names: &import_names,
+                                    type_names: &type_names,
                                     label_names: Vec::new()
                                 };
+
+                                let mut saw_type = false;
+                                let mut param_index = 0;
+
+                                let mut param_types = Vec::new();
+                                let mut return_type = None;
 
                                 while let Some(s) = it.next() {
                                     match s {
@@ -319,11 +335,19 @@ impl TestCase {
                                             for a in args {
                                                 match a {
                                                     &Sexpr::Identifier(ref v) => {
-                                                        ctx.func.ty.param_types.push(parse_type(v.as_slice()).to_u8());
+                                                        if saw_type {
+                                                            param_index += 1;
+                                                        } else {
+                                                            param_types.push(parse_type(v.as_slice()).to_u8());
+                                                        }
                                                         last_var = false;
                                                     }
                                                     &Sexpr::Variable(ref v) => {
-                                                        ctx.local_names.insert(v.as_slice(), ctx.func.ty.param_types.len());
+                                                        if saw_type {
+                                                            ctx.local_names.insert(v.as_slice(), param_index);
+                                                        } else {
+                                                            ctx.local_names.insert(v.as_slice(), param_types.len());
+                                                        }
                                                         last_var = true;
                                                     }
                                                     _ => panic!()
@@ -333,14 +357,19 @@ impl TestCase {
                                         };
                                         (result &ty) => {
                                             if let &Sexpr::Identifier(ref v) = ty {
-                                                ctx.func.ty.return_type = Some(parse_type(v.as_slice()));
+                                                return_type = Some(parse_type(v.as_slice()));
                                             } else {
                                                 panic!("3");
                                             }
                                         };
+                                        (type *args) => {
+                                            assert!(!saw_type);
+                                            ctx.func.ty_index = Some(parse_function_ty(&type_names, &mut m.types, s));
+                                        };
                                         (local &id &ty) => {
                                             if let &Sexpr::Variable(ref v) = id {
-                                                ctx.local_names.insert(v.as_slice(), ctx.func.ty.param_types.len() + ctx.func.local_types.len());
+                                                panic!("bad shit will happen here if param_types isn't populated (i.e. we got (type $a) instead of (param i32))");
+                                                ctx.local_names.insert(v.as_slice(), param_types.len() + ctx.func.local_types.len());
                                             } else {
                                                 panic!("4");
                                             }
@@ -365,7 +394,15 @@ impl TestCase {
                                     );
                                 }
 
-                                m.functions.push(ctx.func.ty.clone());
+                                if let Some(ty_index) = ctx.func.ty_index {
+                                    m.functions.push(ty_index);
+                                } else {
+                                    m.functions.push(TypeIndex(m.types.len()));
+                                    m.types.push(FunctionType {
+                                        param_types: param_types,
+                                        return_type: return_type,
+                                    });
+                                }
                                 m.code.push(ctx.func.build());
                             };
                             (export &name &id) => {
@@ -391,11 +428,8 @@ impl TestCase {
                             (import *args) => {
                                 // already handled
                             };
-                            (type &id &ty) => {
-                                // println!("found type!");
-                            };
-                            (type &ty) => {
-                                // println!("found type!");
+                            (type *args) => {
+                                // already handled
                             };
                             (memory *args) => {
                                 let i = 0;
@@ -445,7 +479,9 @@ impl TestCase {
                                 }
                             };
                             (table *items) => {
-                                // println!("found table!");
+                                for it in items {
+                                    m.table.push(FunctionIndex(read_function_name(&function_names, it)));
+                                }
                             };
                             (start &id) => {
                                 // println!("found start!");
@@ -518,6 +554,7 @@ struct FunctionContext<'a> {
     func: FunctionBuilder,
     function_names: &'a HashMap<&'a [u8], usize>,
     import_names: &'a HashMap<&'a [u8], usize>,
+    type_names: &'a HashMap<&'a [u8], usize>,
     label_names: Vec<&'a [u8]>
 }
 
@@ -526,6 +563,15 @@ const EMPTY_DATA: &'static [u8] = &[];
 fn log2(data: u32) -> u32 {
     assert!(data.count_ones() == 1);
     data.trailing_zeros()
+}
+
+fn read_function_name(function_names: &HashMap<&[u8], usize>, expr: &Sexpr) -> usize {
+    match expr {
+        &Sexpr::Variable(ref name) => *function_names.get(name.as_bytes())
+            .unwrap_or_else(||panic!("no function named {}", expr)),
+        &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
+        _ => panic!("no function named {}", expr)
+    }
 }
 
 impl<'a> FunctionContext<'a> {
@@ -538,10 +584,15 @@ impl<'a> FunctionContext<'a> {
     }
 
     fn read_function(&self, expr: &Sexpr) -> usize {
+        read_function_name(self.function_names, expr)
+    }
+
+    fn read_type(&self, expr: &Sexpr) -> usize {
         match expr {
-            &Sexpr::Variable(ref name) => *self.function_names.get(name.as_bytes()).unwrap(),
+            &Sexpr::Variable(ref name) => *self.type_names.get(name.as_bytes())
+                .unwrap_or_else(||panic!("no type named {}", expr)),
             &Sexpr::Identifier(ref num) => usize::from_str(str::from_utf8(num).unwrap()).unwrap(),
-            _ => panic!("no function named {}", expr)
+            _ => panic!("no type named {}", expr)
         }
     }
 
@@ -751,7 +802,11 @@ impl<'a> FunctionContext<'a> {
                         let num = self.parse_ops(&args[1..]);
                         self.push(NormalOp::Call{argument_count: num as u32, index: FunctionIndex(index)});
                     }
-                    // "callindirect" => { self.push(NormalOp::Nop); }
+                    b"call_indirect" => {
+                        let index = self.read_type(&args[0]);
+                        let num = self.parse_ops(&args[1..]);
+                        self.push(NormalOp::CallIndirect{argument_count: num as u32 - 1, index: TypeIndex(index)});
+                    }
                     b"call_import" => {
                         let index = self.read_import(&args[0]);
                         let num = self.parse_ops(&args[1..]);
@@ -1441,19 +1496,64 @@ fn parse_var_id(node: &Sexpr) -> &[u8] {
     }
 }
 
-fn parse_function_ty(node: &Sexpr) -> FunctionType<Vec<u8>> {
+fn parse_function_ty(
+    type_names: &HashMap<&[u8], usize>,
+    types: &mut Vec<FunctionType<Vec<u8>>>,
+    node: &Sexpr) -> TypeIndex {
+
+    sexpr_match!(node;
+        (param *params) => {
+            let mut ty = FunctionType {
+                param_types: Vec::new(),
+                return_type: None
+            };
+            for p in params {
+                ty.param_types.push(parse_type_expr(p).to_u8());
+            }
+            let index = types.len();
+            types.push(ty);
+            return TypeIndex(index);
+        };
+        (type &id) => {
+            let index = match id {
+                &Sexpr::Identifier(ref id) => {
+                    usize::from_str(str::from_utf8(id.as_slice()).unwrap()).unwrap()
+                }
+                &Sexpr::Variable(ref id) => {
+                    *type_names.get(id.as_slice()).unwrap()
+                }
+                _ => panic!()
+            };
+            return TypeIndex(index);
+        };
+        _ => panic!("unknown ty spec: {}", node)
+    );
+    panic!();
+}
+
+fn parse_type_signature(node: &Sexpr) -> FunctionType<Vec<u8>> {
     let mut ty = FunctionType {
         param_types: Vec::new(),
         return_type: None
     };
 
     sexpr_match!(node;
-        (param *params) => {
-            for p in params {
-                ty.param_types.push(parse_type_expr(p).to_u8());
+        (func *args) => {
+            for s in args {
+                sexpr_match!(s;
+                    (param *params) => {
+                        for p in params {
+                            ty.param_types.push(parse_type_expr(p).to_u8());
+                        }
+                    };
+                    (result &a) => {
+                        ty.return_type = Some(parse_type_expr(a));
+                    };
+                    _ => panic!("unexpected sig part: {}", node)
+                );
             }
         };
-        _ => panic!()
+        _ => panic!("unknown ty sig: {}", node)
     );
     ty
 }

@@ -193,11 +193,6 @@ impl<'a, B: AsBytes> Instance<'a, B> {
         }
     }
 
-    pub fn invoke_import(&mut self, func: ImportIndex, args: &[Dynamic]) -> InterpResult {
-        let (module, index) = self.bound_imports[func.0];
-        self.bound_instances[module].invoke_export(index, args)
-    }
-
     pub fn invoke(&mut self, func: FunctionIndex, args: &[Dynamic]) -> InterpResult {
         println!("running {}",
             self.module.find_name(func)
@@ -210,8 +205,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         self.call_stack_depth += 1;
 
-
-        let ty = &self.module.functions[func.0];
+        let ty = &self.module.types[self.module.functions[func.0].0];
         if args.len() != ty.param_types.as_bytes().len() {
             panic!("expected {} args, but got {}", ty.param_types.as_bytes().len(), args.len());
         }
@@ -402,26 +396,42 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     &NormalOp::CallIndirect{argument_count, index: type_index} => {
                         let table_index = context.stack.pop().unwrap().unwrap().to_u32();
 
-                        let index = context.instance.module.table[table_index as usize];
+                        let ti = table_index as usize;
+                        if ti >= context.instance.module.table.len() {
+                            Res::Trap
+                        } else {
+                            let index = context.instance.module.table[ti];
 
-                        let stack_len = context.stack.len();
-                        let res = {
-                            let args = context.stack[stack_len - argument_count as usize..]
-                                .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
-                            match context.instance.invoke(index, &args) {
-                                InterpResult::Value(v) => Res::Value(v),
-                                InterpResult::Trap => return Res::Trap,
+                            // println!("index {} a {} b {}", index.0, context.instance.module.functions[index.0],  context.instance.module.types[type_index.0]);
+
+                            if context.instance.module.functions[index.0] == type_index {
+                                let stack_len = context.stack.len();
+                                let res = {
+                                    let args = context.stack[stack_len - argument_count as usize..]
+                                        .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
+                                    match context.instance.invoke(index, &args) {
+                                        InterpResult::Value(v) => Res::Value(v),
+                                        InterpResult::Trap => return Res::Trap,
+                                    }
+                                };
+                                context.stack.drain(stack_len - argument_count as usize..);
+                                res
+                            } else {
+                                Res::Trap
                             }
-                        };
-                        context.stack.drain(stack_len - argument_count as usize..);
-                        res
+                        }
                     }
                     &NormalOp::CallImport{argument_count, index} => {
                         let stack_len = context.stack.len();
                         let res = {
                             let args = context.stack[stack_len - argument_count as usize..]
                                 .iter().map(|e| e.unwrap()).collect::<Vec<_>>();
-                            match context.instance.invoke_import(index, &args) {
+
+                            println!("import {} of {}", index.0, context.instance.bound_imports.len());
+
+                            let (module, index) = context.instance.bound_imports[index.0];
+                            println!("module {} index {}", module, index.0);
+                            match context.instance.bound_instances[module].invoke_export(index, args.as_slice()) {
                                 InterpResult::Value(v) => Res::Value(v),
                                 InterpResult::Trap => return Res::Trap,
                             }
