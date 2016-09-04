@@ -564,7 +564,7 @@ struct FunctionContext<'a> {
     function_names: &'a HashMap<&'a [u8], usize>,
     import_names: &'a HashMap<&'a [u8], usize>,
     type_names: &'a HashMap<&'a [u8], usize>,
-    label_names: Vec<&'a [u8]>
+    label_names: Vec<Option<&'a [u8]>>
 }
 
 const EMPTY_DATA: &'static [u8] = &[];
@@ -613,12 +613,14 @@ impl<'a> FunctionContext<'a> {
         }
     }
 
-    fn read_label(&self, expr: &Sexpr) -> usize {
+    fn read_label(&self, expr: &'a Sexpr) -> usize {
+        println!("labels {}", self.label_names.len());
         match expr {
             &Sexpr::Variable(ref name) => {
-                for i in (0..self.label_names.len() - 1).rev() {
-                    if self.label_names[i] == name.as_slice() {
-                        return i;
+                for i in (0..self.label_names.len()).rev() {
+                    // println!("check label {} {}", i, str::from_utf8(self.label_names[i]).unwrap());
+                    if self.label_names[i] == Some(name.as_slice()) {
+                        return self.label_names.len() - 1 - i;
                     }
                 }
                 panic!("no label named {}", expr)
@@ -669,15 +671,13 @@ impl<'a> FunctionContext<'a> {
                             (0, None)
                         };
 
-                        if let Some(label) = label_name {
-                            self.label_names.push(label);
-                        }
+                        self.label_names.push(label_name);
+
                         self.func.ops.push(LinearOp::Block);
                         self.parse_ops(&args[index..]);
                         self.func.ops.push(LinearOp::End);
-                        if let Some(_) = label_name {
-                            self.label_names.pop().unwrap();
-                        }
+
+                        self.label_names.pop().unwrap();
                     }
                     b"loop" => {
                         let (index, label_name_begin) = if args.len() > 0 {
@@ -690,7 +690,7 @@ impl<'a> FunctionContext<'a> {
                         };
 
                         let (index, label_name_end) = if index + 1 < args.len() {
-                            match &args[0] {
+                            match &args[index] {
                                 &Sexpr::Variable(ref v) => (index + 1, Some(v.as_slice())),
                                 _ => (index, None)
                             }
@@ -698,33 +698,31 @@ impl<'a> FunctionContext<'a> {
                             (index, None)
                         };
 
-                        if let Some(label) = label_name_begin {
-                            self.label_names.push(label);
-                        }
+                        self.label_names.push(label_name_begin);
+                        self.label_names.push(label_name_end);
 
-                        if let Some(label) = label_name_end {
-                            self.label_names.push(label);
-                        }
                         self.func.ops.push(LinearOp::Loop);
                         self.parse_ops(&args[index..]);
                         self.func.ops.push(LinearOp::End);
-                        if let Some(_) = label_name_begin {
-                            self.label_names.pop().unwrap();
-                        }
-                        if let Some(_) = label_name_end {
-                            self.label_names.pop().unwrap();
-                        }
+
+                        self.label_names.pop().unwrap();
+                        self.label_names.pop().unwrap();
                     }
                     b"if" => {
                         assert!(args.len() == 2 || args.len() == 3);
                         self.parse_op(&args[0]);
                         self.func.ops.push(LinearOp::If);
+
+                        self.label_names.push(None);
+
                         self.parse_op(&args[1]);
                         if args.len() == 3 {
                             self.func.ops.push(LinearOp::Else);
                             self.parse_op(&args[2]);
                         }
                         self.func.ops.push(LinearOp::End);
+
+                        self.label_names.pop().unwrap();
                     }
                     b"select" => {
                         assert!(self.parse_ops(args) == 3);
