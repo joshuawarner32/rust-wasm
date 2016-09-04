@@ -394,7 +394,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         res
                     }
                     &NormalOp::CallIndirect{argument_count, index: type_index} => {
-                        let table_index = context.stack.pop().unwrap().unwrap().to_u32();
+                        let table_index = context.stack[context.stack.len() - 1 - argument_count as usize].unwrap().to_u32();
 
                         let ti = table_index as usize;
                         if ti >= context.instance.module.table.len() {
@@ -402,7 +402,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         } else {
                             let index = context.instance.module.table[ti];
 
-                            // println!("index {} a {} b {}", index.0, context.instance.module.functions[index.0],  context.instance.module.types[type_index.0]);
+                            println!("index {} a {} b {}", index.0, context.instance.module.functions[index.0].0,  type_index.0);
 
                             if context.instance.module.functions[index.0] == type_index {
                                 let stack_len = context.stack.len();
@@ -414,7 +414,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                                         InterpResult::Trap => return Res::Trap,
                                     }
                                 };
-                                context.stack.drain(stack_len - argument_count as usize..);
+                                context.stack.drain(stack_len - argument_count as usize - 1..);
                                 res
                             } else {
                                 Res::Trap

@@ -337,7 +337,7 @@ impl TestCase {
                                             for a in args {
                                                 match a {
                                                     &Sexpr::Identifier(ref v) => {
-                                                        if saw_type {
+                                                        if let Some(_) = ctx.func.ty_index {
                                                             named_param_index += 1;
                                                         } else {
                                                             param_types.push(parse_type(v.as_slice()).to_u8());
@@ -345,7 +345,7 @@ impl TestCase {
                                                         last_var = false;
                                                     }
                                                     &Sexpr::Variable(ref v) => {
-                                                        if saw_type {
+                                                        if let Some(_) = ctx.func.ty_index {
                                                             ctx.local_names.insert(v.as_slice(), named_param_index);
                                                         } else {
                                                             param_total_count += 1;
@@ -406,11 +406,22 @@ impl TestCase {
                                 if let Some(ty_index) = ctx.func.ty_index {
                                     m.functions.push(ty_index);
                                 } else {
-                                    m.functions.push(TypeIndex(m.types.len()));
-                                    m.types.push(FunctionType {
+                                    let mut found = false;
+                                    let myty = FunctionType {
                                         param_types: param_types,
                                         return_type: return_type,
-                                    });
+                                    };
+                                    for (i, ty) in m.types.iter().enumerate() {
+                                        if ty.param_types == myty.param_types && ty.return_type == myty.return_type {
+                                            m.functions.push(TypeIndex(i));
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if !found {
+                                        m.functions.push(TypeIndex(m.types.len()));
+                                        m.types.push(myty);
+                                    }
                                 }
                                 m.code.push(ctx.func.build());
                             };
