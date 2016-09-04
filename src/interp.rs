@@ -357,7 +357,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         }
                     }
                     &NormalOp::Unreachable => {
-                        panic!()
+                        Res::Trap
                     }
                     &NormalOp::Drop => {
                         context.stack.pop().unwrap();

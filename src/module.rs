@@ -428,6 +428,8 @@ impl FunctionBuilder {
                         ast.push(0x36);
                         write_mem_imm(&mut ast, memimm);
                     }
+                    NormalOp::CurrentMemory => ast.push(0x3b),
+                    NormalOp::GrowMemory => ast.push(0x39),
                     NormalOp::IntBin(IntType::Int32, IntBinOp::Add) => ast.push(0x40),
                     NormalOp::IntBin(IntType::Int32, IntBinOp::Sub) => ast.push(0x41),
                     NormalOp::IntBin(IntType::Int32, IntBinOp::Mul) => ast.push(0x42),

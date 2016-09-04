@@ -559,25 +559,20 @@ struct SpecTestModule;
 
 impl BoundInstance for SpecTestModule {
     fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
-        match func.0 {
-            0 => println!("print: {}", args[0].to_u32()),
-            1 => println!("print: {}", args[0].to_u64()),
-            2 => println!("print: {}", args[0].to_f32()),
-            3 => println!("print: {}", args[0].to_f64()),
-            _ => panic!()
+        for a in args {
+            match a {
+                &Dynamic::Int32(v) => println!("print: {}", v),
+                &Dynamic::Int64(v) => println!("print: {}", v),
+                &Dynamic::Float32(v) => println!("print: {}", v),
+                &Dynamic::Float64(v) => println!("print: {}", v),
+            }
         }
         InterpResult::Value(None)
     }
     fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex {
-        assert!(ty.param_types.len() == 1);
         assert!(name == b"print");
         assert!(ty.return_type == None);
-        match Type::from_u8(ty.param_types[0]) {
-            Type::Int32 => ExportIndex(0),
-            Type::Int64 => ExportIndex(1),
-            Type::Float32 => ExportIndex(2),
-            Type::Float64 => ExportIndex(3),
-        }
+        ExportIndex(0)
     }
 }
 
@@ -934,8 +929,14 @@ impl<'a> FunctionContext<'a> {
                         let memimm = self.parse_mem_imm(args, 2);
                         self.push(NormalOp::FloatStore(FloatType::Float64, memimm));
                     }
-                    // "current_memory" => { self.push(NormalOp::Nop); }
-                    // "grow_memory" => { self.push(NormalOp::Nop); }
+                    b"current_memory" => {
+                        assert_eq!(args.len(), 0);
+                        self.push(NormalOp::CurrentMemory);
+                    }
+                    b"grow_memory" => {
+                        assert_eq!(self.parse_ops(args), 1);
+                        self.push(NormalOp::GrowMemory);
+                    }
                     b"i32.add" => {
                         assert_eq!(self.parse_ops(args), 2);
                         self.push(NormalOp::IntBin(IntType::Int32, IntBinOp::Add));
