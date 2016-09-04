@@ -317,8 +317,10 @@ impl TestCase {
                                     label_names: Vec::new()
                                 };
 
+                                let mut param_total_count = 0;
+
                                 let mut saw_type = false;
-                                let mut param_index = 0;
+                                let mut named_param_index = 0;
 
                                 let mut param_types = Vec::new();
                                 let mut return_type = None;
@@ -336,7 +338,7 @@ impl TestCase {
                                                 match a {
                                                     &Sexpr::Identifier(ref v) => {
                                                         if saw_type {
-                                                            param_index += 1;
+                                                            named_param_index += 1;
                                                         } else {
                                                             param_types.push(parse_type(v.as_slice()).to_u8());
                                                         }
@@ -344,13 +346,14 @@ impl TestCase {
                                                     }
                                                     &Sexpr::Variable(ref v) => {
                                                         if saw_type {
-                                                            ctx.local_names.insert(v.as_slice(), param_index);
+                                                            ctx.local_names.insert(v.as_slice(), named_param_index);
                                                         } else {
+                                                            param_total_count += 1;
                                                             ctx.local_names.insert(v.as_slice(), param_types.len());
                                                         }
                                                         last_var = true;
                                                     }
-                                                    _ => panic!()
+                                                    _ => panic!("4")
                                                 }
                                             }
                                             assert!(!last_var);
@@ -364,20 +367,26 @@ impl TestCase {
                                         };
                                         (type *args) => {
                                             assert!(!saw_type);
-                                            ctx.func.ty_index = Some(parse_function_ty(&type_names, &mut m.types, s));
+                                            let ty_index = parse_function_ty(&type_names, &mut m.types, s);
+                                            ctx.func.ty_index = Some(ty_index);
+                                            param_total_count = m.types[ty_index.0].param_types.len();
                                         };
-                                        (local &id &ty) => {
-                                            if let &Sexpr::Variable(ref v) = id {
-                                                panic!("bad shit will happen here if param_types isn't populated (i.e. we got (type $a) instead of (param i32))");
-                                                ctx.local_names.insert(v.as_slice(), param_types.len() + ctx.func.local_types.len());
-                                            } else {
-                                                panic!("4");
+                                        (local *args) => {
+                                            let mut last_var = false;
+                                            for a in args {
+                                                match a {
+                                                    &Sexpr::Variable(ref v) =>{
+                                                        ctx.local_names.insert(v.as_slice(), param_total_count + ctx.func.local_types.len());
+                                                        last_var = true;
+                                                    }
+                                                    &Sexpr::Identifier(ref v) => {
+                                                        ctx.func.local_types.push(parse_type(v.as_slice()));
+                                                        last_var = false;
+                                                    }
+                                                    _ => panic!("5")
+                                                }
                                             }
-                                            if let &Sexpr::Identifier(ref v) = ty {
-                                                ctx.func.local_types.push(parse_type(v.as_slice()));
-                                            } else {
-                                                panic!("5");
-                                            }
+                                            assert!(!last_var);
                                         };
                                         (local *args) => {
                                             for ty in args {
