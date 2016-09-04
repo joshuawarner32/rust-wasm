@@ -224,6 +224,15 @@ fn write_mem_imm(ast: &mut Vec<u8>, imm: MemImm) {
     write_var_u32(ast, imm.offset);
 }
 
+impl<B: AsBytes> FunctionType<B> {
+    pub fn as_ref(&self) -> FunctionType<&[u8]> {
+        FunctionType {
+            param_types: self.param_types.as_bytes(),
+            return_type: self.return_type
+        }
+    }
+}
+
 impl FunctionBuilder {
     pub fn new() -> FunctionBuilder {
         FunctionBuilder {
@@ -592,11 +601,11 @@ impl<B: AsBytes> Module<B> {
         }
     }
 
-    pub fn find_export(&self, name: &[u8]) -> Option<ExportIndex> {
+    pub fn find_export(&self, name: &[u8], ty: FunctionType<&[u8]>) -> Option<ExportIndex> {
         println!("looking for {}", str::from_utf8(name).unwrap());
         for (i, e) in self.exports.iter().enumerate() {
             // println!("checking {}", str::from_utf8(e.function_name.as_bytes()).unwrap());
-            if e.function_name.as_bytes() == name {
+            if e.function_name.as_bytes() == name && self.types[self.functions[e.function_index.0].0].as_ref() == ty {
                 return Some(ExportIndex(i));
             }
         }

@@ -559,13 +559,25 @@ struct SpecTestModule;
 
 impl BoundInstance for SpecTestModule {
     fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
-        assert_eq!(func.0, 0);
-        println!("print: {}", args[0].to_u32());
+        match func.0 {
+            0 => println!("print: {}", args[0].to_u32()),
+            1 => println!("print: {}", args[0].to_u64()),
+            2 => println!("print: {}", args[0].to_f32()),
+            3 => println!("print: {}", args[0].to_f64()),
+            _ => panic!()
+        }
         InterpResult::Value(None)
     }
-    fn export_by_name(&self, name: &[u8]) -> ExportIndex {
-        assert_eq!(name, b"print");
-        ExportIndex(0)
+    fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex {
+        assert!(ty.param_types.len() == 1);
+        assert!(name == b"print");
+        assert!(ty.return_type == None);
+        match Type::from_u8(ty.param_types[0]) {
+            Type::Int32 => ExportIndex(0),
+            Type::Int64 => ExportIndex(1),
+            Type::Float32 => ExportIndex(2),
+            Type::Float64 => ExportIndex(3),
+        }
     }
 }
 

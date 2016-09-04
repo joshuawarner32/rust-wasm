@@ -2,7 +2,7 @@ use std::{mem, str, iter};
 use std::num::Wrapping;
 use std::collections::HashMap;
 
-use module::{Module, FunctionIndex, ImportIndex, ExportIndex, AsBytes};
+use module::{Module, FunctionIndex, ImportIndex, ExportIndex, AsBytes, FunctionType};
 use types::{Type, Dynamic, Sign, Size, IntType, FloatType};
 use ops::{
     BlockOp, Block, NormalOp, MemImm,
@@ -124,7 +124,7 @@ fn test_store_load() {
 
 pub trait BoundInstance {
     fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult;
-    fn export_by_name(&self, name: &[u8]) -> ExportIndex;
+    fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex;
 }
 
 pub struct Instance<'a, B: AsBytes + 'a> {
@@ -152,8 +152,8 @@ impl<'a, B: AsBytes> BoundInstance for Instance<'a, B> {
     fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
         self.invoke(self.module.exports[func.0].function_index, args)
     }
-    fn export_by_name(&self, name: &[u8]) -> ExportIndex {
-        self.module.find_export(name).unwrap()
+    fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex {
+        self.module.find_export(name, ty).unwrap()
     }
 }
 
@@ -180,7 +180,8 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         let mut bound_imports = module.imports.iter().map(|i| {
             let instance_index = *instance_indices.get(i.module_name.as_bytes()).unwrap();
-            let export_index = bound_instances[instance_index].export_by_name(i.function_name.as_bytes());
+            let export_index = bound_instances[instance_index]
+                .export_by_name_and_type(i.function_name.as_bytes(), module.types[i.function_type.0].as_ref());
             (instance_index, export_index)
         }).collect::<Vec<_>>();
 
