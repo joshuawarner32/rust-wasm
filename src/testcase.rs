@@ -1423,11 +1423,11 @@ impl<'a> FunctionContext<'a> {
                     }
                     b"i32.reinterpret/f32" => {
                         assert_eq!(self.parse_ops(args), 1);
-                        self.push(NormalOp::Reinterpret(Type::Int32, Type::Float32));
+                        self.push(NormalOp::Reinterpret(Type::Float32, Type::Int32));
                     }
                     b"i64.reinterpret/f64" => {
                         assert_eq!(self.parse_ops(args), 1);
-                        self.push(NormalOp::Reinterpret(Type::Int64, Type::Float64));
+                        self.push(NormalOp::Reinterpret(Type::Float64, Type::Int64));
                     }
                     _ => panic!("unexpected instr: {}", s)
                 };
@@ -1476,6 +1476,9 @@ fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
             println!("parsing {}", str::from_utf8(text).unwrap());
 
             let mut text = text.as_slice();
+            if text.starts_with(b"+") {
+                text = &text[1..];
+            }
             let neg = if text.starts_with(b"-") {
                 text = &text[1..];
                 true

@@ -881,19 +881,24 @@ fn interp_float_convert(ty: FloatType, a: Dynamic) -> Dynamic {
 fn interp_reinterpret(type_from: Type, type_to: Type, a: Dynamic) -> Dynamic {
     assert_eq!(type_from, a.get_type());
 
+
     let res = match a {
         Dynamic::Int32(v) => v.0 as u64,
         Dynamic::Int64(v) => v.0,
-        Dynamic::Float32(v) => unsafe { mem::transmute(v as f64) },
+        Dynamic::Float32(v) => unsafe { mem::transmute::<f32, u32>(v) as u64 },
         Dynamic::Float64(v) => unsafe { mem::transmute(v) },
     };
 
-    match type_to {
+    let fin = match type_to {
         Type::Int32 => Dynamic::from_u32(res as u32),
         Type::Int64 => Dynamic::from_u64(res),
         Type::Float32 => Dynamic::Float32(unsafe { mem::transmute((res & 0xffffffff) as u32) }),
         Type::Float64 => Dynamic::Float64(unsafe { mem::transmute(res) })
-    }
+    };
+
+    println!("a {} res {} fin {}", a, res, fin);
+
+    fin
 }
 
 fn extend_u8(val: u8, inttype: IntType, sign: Sign) -> Dynamic {
