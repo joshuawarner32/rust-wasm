@@ -309,9 +309,9 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                 &BlockOp::Normal(ref op) => match op {
                     &NormalOp::Nop => Res::Value(None),
                     &NormalOp::Select => {
+                        let cond = context.stack.pop().unwrap().unwrap();
                         let b = context.stack.pop().unwrap();
                         let a = context.stack.pop().unwrap();
-                        let cond = context.stack.pop().unwrap().unwrap();
                         Res::Value(if cond.to_u32() != 0 { a } else { b })
                     },
                     &NormalOp::Br{has_arg, relative_depth} => {

@@ -1473,7 +1473,7 @@ fn parse_int(node: &Sexpr, ty: IntType) -> Dynamic {
 fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
     match node {
         &Sexpr::Identifier(ref text) => {
-            // println!("parsing {}", text);
+            println!("parsing {}", str::from_utf8(text).unwrap());
 
             let mut text = text.as_slice();
             let neg = if text.starts_with(b"-") {
@@ -1489,6 +1489,27 @@ fn parse_float(node: &Sexpr, ty: FloatType) -> Dynamic {
                 f64::INFINITY
             } else if text == b"nan" {
                 f64::NAN
+            } else if text.starts_with(b"nan:0x") {
+                let value = u64::from_str_radix(str::from_utf8(&text[b"nan:0x".len()..]).unwrap(), 16).unwrap();
+                assert!(value != 0);
+                return match ty {
+                    FloatType::Float32 => {
+                        let mut bits: u32 = ((1 << 8) - 1) << 23;
+                        bits |= value as u32;
+                        if neg {
+                            bits |= 0x8000_0000;
+                        }
+                        Dynamic::Float32(unsafe { mem::transmute(bits) })
+                    },
+                    FloatType::Float64 => {
+                        let mut bits: u64 = ((1 << 11) - 1) << 52;
+                        bits |= value;
+                        if neg {
+                            bits |= 0x8000_0000_0000_0000;
+                        }
+                        Dynamic::Float64(unsafe { mem::transmute(bits) })
+                    },
+                };
             } else {
                 f64::from_str(str::from_utf8(text).unwrap()).unwrap()
             };
