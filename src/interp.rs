@@ -534,6 +534,20 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             res
         };
 
+        fn verify_return_type(ty: Option<Type>, v: Option<Dynamic>) -> InterpResult {
+            match ty {
+                Some(ty) => {
+                    assert_eq!(ty, v.unwrap().get_type());
+                    InterpResult::Value(v)
+                }
+                None => {
+                    // TODO: we really ought to be asserting that v is None here... but
+                    // we're having some problems with Dropping values (see block.wast: drop-last)
+                    InterpResult::Value(None)
+                }
+            }
+        }
+
         let res = {
             let mut context = Context {
                 instance: self,
@@ -541,20 +555,9 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                 stack: Vec::new(),
             };
             match run_block(&mut context, &root_ops) {
-                Res::Value(v) | Res::Return(v) => {
-                    match ty.return_type {
-                        Some(ty) => {
-                            assert_eq!(ty, v.unwrap().get_type());
-                            InterpResult::Value(v)
-                        }
-                        None => {
-                            // TODO: we really ought to be asserting that v is None here... but
-                            // we're having some problems with Dropping values (see block.wast: drop-last)
-                            InterpResult::Value(None)
-                        }
-                    }
-                }
+                Res::Value(v) | Res::Return(v) => verify_return_type(ty.return_type, v),
                 Res::Trap => InterpResult::Trap,
+                Res::Branch(0, v) => verify_return_type(ty.return_type, v),
                 _ => panic!()
             }
         };
