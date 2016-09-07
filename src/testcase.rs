@@ -679,7 +679,7 @@ impl<'a> FunctionContext<'a> {
             (ident:&op *args) => {
                 match op.as_slice() {
                     b"nop" => {self.push(NormalOp::Nop);},
-                    b"block" => {
+                    b"block" | b"then" | b"else" => {
                         let (index, label_name) = if args.len() > 0 {
                             match &args[0] {
                                 &Sexpr::Variable(ref v) => (1, Some(v.as_slice())),
