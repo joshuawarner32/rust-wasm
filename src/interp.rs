@@ -479,10 +479,18 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     }
 
                     &NormalOp::CurrentMemory => {
-                        panic!();
+                        Res::Value(Some(Dynamic::from_u32(context.instance.memory.0.len() as u32 / 0x10000)))
                     }
                     &NormalOp::GrowMemory => {
-                        panic!();
+                        let len = context.instance.memory.0.len();
+                        let extra_pages = context.stack.pop().unwrap().unwrap().to_u32() as usize;
+                        let new_len = len + extra_pages * 0x10000;
+                        if new_len < 0x8000_0000 {
+                            context.instance.memory.0.resize(new_len, 0);
+                            Res::Value(None)
+                        } else {
+                            Res::Trap
+                        }
                     }
 
                     &NormalOp::IntBin(inttype, intbinop) => {
