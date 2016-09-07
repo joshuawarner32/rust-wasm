@@ -440,26 +440,42 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         context.stack.drain(stack_len - argument_count as usize..);
                         res
                     }
-                    &NormalOp::IntLoad(inttype, sign, size, memimm) => {
-                        let addr = context.stack.pop().unwrap().unwrap();
-                        Res::Value(Some(context.instance.memory.load_int(addr.to_u32(), inttype, sign, size, memimm)))
+                    &NormalOp::IntLoad(ty, sign, size, memimm) => {
+                        let addr = context.stack.pop().unwrap().unwrap().to_u32();
+                        if addr as usize + size.to_int()/8 <= context.instance.memory.0.len() {
+                            Res::Value(Some(context.instance.memory.load_int(addr, ty, sign, size, memimm)))
+                        } else {
+                            Res::Trap
+                        }
                     }
-                    &NormalOp::FloatLoad(floattype, memimm) => {
-                        let addr = context.stack.pop().unwrap().unwrap();
-                        Res::Value(Some(context.instance.memory.load_float(addr.to_u32(), floattype, memimm)))
+                    &NormalOp::FloatLoad(ty, memimm) => {
+                        let addr = context.stack.pop().unwrap().unwrap().to_u32();
+                        if addr as usize + ty.to_type().size().to_int()/8 <= context.instance.memory.0.len() {
+                            Res::Value(Some(context.instance.memory.load_float(addr, ty, memimm)))
+                        } else {
+                            Res::Trap
+                        }
                     }
-                    &NormalOp::IntStore(inttype, size, memimm) => {
+                    &NormalOp::IntStore(ty, size, memimm) => {
                         let value = context.stack.pop().unwrap().unwrap();
-                        let addr = context.stack.pop().unwrap().unwrap();
-                        assert!(value.get_type() == inttype.to_type());
-                        context.instance.memory.store_int(addr.to_u32(), value, size, memimm);
-                        Res::Value(Some(value))
+                        let addr = context.stack.pop().unwrap().unwrap().to_u32();
+                        if addr as usize + size.to_int()/8 <= context.instance.memory.0.len() {
+                            assert!(value.get_type() == ty.to_type());
+                            context.instance.memory.store_int(addr, value, size, memimm);
+                            Res::Value(Some(value))
+                        } else {
+                            Res::Trap
+                        }
                     }
-                    &NormalOp::FloatStore(floattype, memimm) => {
+                    &NormalOp::FloatStore(ty, memimm) => {
                         let value = context.stack.pop().unwrap().unwrap();
-                        let addr = context.stack.pop().unwrap().unwrap();
-                        context.instance.memory.store_float(addr.to_u32(), value, floattype, memimm);
-                        Res::Value(Some(value))
+                        let addr = context.stack.pop().unwrap().unwrap().to_u32();
+                        if addr as usize + ty.to_type().size().to_int()/8 <= context.instance.memory.0.len() {
+                            context.instance.memory.store_float(addr, value, ty, memimm);
+                            Res::Value(Some(value))
+                        } else {
+                            Res::Trap
+                        }
                     }
 
                     &NormalOp::CurrentMemory => {
@@ -506,7 +522,10 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                     }
                     &NormalOp::FloatToInt(floattype, inttype, sign) => {
                         let a = context.stack.pop().unwrap().unwrap();
-                        Res::Value(Some(interp_float_to_int(floattype, inttype, sign, a)))
+                        match interp_float_to_int(floattype, inttype, sign, a) {
+                            None => Res::Trap,
+                            Some(v) => Res::Value(Some(v))
+                        }
                     }
                     &NormalOp::IntExtend(sign) => {
                         let a = context.stack.pop().unwrap().unwrap();
@@ -838,17 +857,21 @@ fn interp_float_cmp(ty: FloatType, op: FloatCmpOp, a: Dynamic, b: Dynamic) -> Dy
     } { 1 } else { 0 })
 }
 
-fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dynamic) -> Dynamic {
+fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dynamic) -> Option<Dynamic> {
     assert_eq!(a.get_type(), floattype.to_type());
 
     let a = a.to_float();
 
-    Dynamic::from_int(inttype, match (sign, inttype) {
-        (Sign::Signed, IntType::Int32) => u64_from_real_i32(a as i32),
-        (Sign::Unsigned, IntType::Int32) => Wrapping(a as u64),
-        (Sign::Signed, IntType::Int64) => u64_from_i64(Wrapping(a as i64)),
-        (Sign::Unsigned, IntType::Int64) => Wrapping(a as u64),
-    }.0)
+    if a.is_nan() {
+        None
+    } else {
+        Some(Dynamic::from_int(inttype, match (sign, inttype) {
+            (Sign::Signed, IntType::Int32) => u64_from_real_i32(a as i32),
+            (Sign::Unsigned, IntType::Int32) => Wrapping(a as u64),
+            (Sign::Signed, IntType::Int64) => u64_from_i64(Wrapping(a as i64)),
+            (Sign::Unsigned, IntType::Int64) => Wrapping(a as u64),
+        }.0))
+    }
 }
 
 fn interp_int_extend(sign: Sign, a: Dynamic) -> Dynamic {
