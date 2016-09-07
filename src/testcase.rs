@@ -657,8 +657,8 @@ impl<'a> FunctionContext<'a> {
         num
     }
 
-    fn push(&mut self, op: NormalOp<'static>) {
-        self.func.ops.push(LinearOp::Normal(op));
+    fn push<'b>(&mut self, op: NormalOp<'b>) {
+        self.func.write(LinearOp::Normal(op));
     }
 
     fn parse_mem_imm(&mut self, exprs: &'a [Sexpr], count: usize) -> MemImm {
@@ -691,9 +691,9 @@ impl<'a> FunctionContext<'a> {
 
                         self.label_names.push(label_name);
 
-                        self.func.ops.push(LinearOp::Block);
+                        self.func.write(LinearOp::Block);
                         self.parse_ops(&args[index..]);
-                        self.func.ops.push(LinearOp::End);
+                        self.func.write(LinearOp::End);
 
                         self.label_names.pop().unwrap();
                     }
@@ -719,9 +719,9 @@ impl<'a> FunctionContext<'a> {
                         self.label_names.push(label_name_begin);
                         self.label_names.push(label_name_end);
 
-                        self.func.ops.push(LinearOp::Loop);
+                        self.func.write(LinearOp::Loop);
                         self.parse_ops(&args[index..]);
-                        self.func.ops.push(LinearOp::End);
+                        self.func.write(LinearOp::End);
 
                         self.label_names.pop().unwrap();
                         self.label_names.pop().unwrap();
@@ -729,16 +729,16 @@ impl<'a> FunctionContext<'a> {
                     b"if" => {
                         assert!(args.len() == 2 || args.len() == 3);
                         self.parse_op(&args[0]);
-                        self.func.ops.push(LinearOp::If);
+                        self.func.write(LinearOp::If);
 
                         self.label_names.push(None);
 
                         self.parse_op(&args[1]);
                         if args.len() == 3 {
-                            self.func.ops.push(LinearOp::Else);
+                            self.func.write(LinearOp::Else);
                             self.parse_op(&args[2]);
                         }
-                        self.func.ops.push(LinearOp::End);
+                        self.func.write(LinearOp::End);
 
                         self.label_names.pop().unwrap();
                     }
@@ -768,14 +768,25 @@ impl<'a> FunctionContext<'a> {
                         }
                     }
                     b"br_table" => {
-                        let relative_depth = self.read_label(&args[0]);
+                        let mut target_data = Vec::new();
 
-                        let mut i = 1;
+                        fn write_u32(ast: &mut Vec<u8>, v: u32) {
+                            ast.push(((v >> 0*8) & 0xff) as u8);
+                            ast.push(((v >> 1*8) & 0xff) as u8);
+                            ast.push(((v >> 2*8) & 0xff) as u8);
+                            ast.push(((v >> 3*8) & 0xff) as u8);
+                        }
+
+                        let mut i = 0;
+                        let mut last = None;
 
                         loop {
                             match &args[i] {
-                                &Sexpr::Variable(_) => {},
-                                &Sexpr::Identifier(_) => {},
+                                &Sexpr::Variable(_) | &Sexpr::Identifier(_) => {
+                                    let l = self.read_label(&args[i]) as u32;
+                                    last = Some(l);
+                                    write_u32(&mut target_data, l);
+                                }
                                 _ => break,
                             }
                             i += 1;
@@ -784,9 +795,9 @@ impl<'a> FunctionContext<'a> {
                         self.parse_op(&args[i]);
                         if i + 1 < args.len() {
                             self.parse_op(&args[i + 1]);
-                            self.push(NormalOp::BrTable{has_arg: true, target_data: &EMPTY_DATA, default: relative_depth as u32});
+                            self.push(NormalOp::BrTable{has_arg: true, target_data: &target_data[..target_data.len() - 4], default: last.unwrap()});
                         } else {
-                            self.push(NormalOp::BrTable{has_arg: false, target_data: &EMPTY_DATA, default: relative_depth as u32});
+                            self.push(NormalOp::BrTable{has_arg: false, target_data: &target_data[..target_data.len() - 4], default: last.unwrap()});
                         }
                     }
                     b"return" => {
