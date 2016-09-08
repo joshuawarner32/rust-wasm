@@ -10,8 +10,8 @@ mod sexpr;
 mod hexfloat;
 
 pub use types::Dynamic;
-pub use module::{Module, FunctionIndex};
-pub use interp::Instance;
+pub use module::{Module, FunctionIndex, ExportIndex, FunctionType};
+pub use interp::{Instance, BoundInstance, InterpResult};
 pub use testcase::TestCase;
 
 #[cfg(test)]
