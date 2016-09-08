@@ -425,6 +425,9 @@ impl TestCase {
                                 }
                                 m.code.push(ctx.func.build());
                             };
+                            (export &name memory) => {
+                                // TODO: ... do something with it ...
+                            };
                             (export &name &id) => {
                                 match name {
                                     &Sexpr::String(ref name) => {
@@ -504,7 +507,7 @@ impl TestCase {
                                 }
                             };
                             (start &id) => {
-                                // println!("found start!");
+                                m.start_function_index = Some(FunctionIndex(read_function_name(&function_names, id)));
                             };
                             _ => {
                                 panic!("unhandled inner: {}", s);
@@ -548,6 +551,10 @@ impl TestCase {
             let mut import_table = HashMap::new();
             import_table.insert(&b"spectest"[..], Box::new(SpecTestModule) as Box<BoundInstance>);
             let mut instance = Instance::new(&m.0, import_table);
+            if let Some(id) = m.0.start_function_index {
+                println!("running start function");
+                assert!(instance.invoke(id, &[]) != InterpResult::Trap);
+            }
             for assert in &m.1 {
                 assert.run(&mut instance);
             }

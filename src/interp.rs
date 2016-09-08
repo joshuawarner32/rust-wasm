@@ -487,7 +487,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
                         let new_len = len + extra_pages * 0x10000;
                         if new_len < 0x8000_0000 {
                             context.instance.memory.0.resize(new_len, 0);
-                            Res::Value(None)
+                            Res::Value(Some(Dynamic::from_u32(len as u32 / 0x10000)))
                         } else {
                             Res::Trap
                         }
