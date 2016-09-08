@@ -99,6 +99,30 @@ impl IntType {
             IntType::Int64 => Type::Int64,
         }
     }
+    // pub fn min_unsigned_value(self) -> u64 {
+    //     match self {
+    //         IntType::Int32 => 0u64,
+    //         IntType::Int64 => 0u64,
+    //     }
+    // }
+    pub fn max_unsigned_value(self) -> u64 {
+        match self {
+            IntType::Int32 => 4294967295u64,
+            IntType::Int64 => 18446744073709551615u64,
+        }
+    }
+    pub fn min_signed_value(self) -> i64 {
+        match self {
+            IntType::Int32 => -2147483648i64,
+            IntType::Int64 => -9223372036854775808i64,
+        }
+    }
+    pub fn max_signed_value(self) -> i64 {
+        match self {
+            IntType::Int32 => 2147483647i64,
+            IntType::Int64 => 9223372036854775807i64,
+        }
+    }
 }
 
 impl fmt::Display for IntType {
@@ -121,6 +145,7 @@ impl FloatType {
         }
     }
 }
+
 impl fmt::Display for FloatType {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "{}", self.to_type())
@@ -281,10 +306,10 @@ impl Dynamic {
 
     pub fn get_type(&self) -> Type {
         match self {
-            &Dynamic::Int32(val) => Type::Int32,
-            &Dynamic::Int64(val) => Type::Int64,
-            &Dynamic::Float32(val) => Type::Float32,
-            &Dynamic::Float64(val) => Type::Float64,
+            &Dynamic::Int32(_) => Type::Int32,
+            &Dynamic::Int64(_) => Type::Int64,
+            &Dynamic::Float32(_) => Type::Float32,
+            &Dynamic::Float64(_) => Type::Float64,
         }
     }
 }

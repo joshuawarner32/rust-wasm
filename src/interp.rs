@@ -819,6 +819,19 @@ fn interp_float_bin(ty: FloatType, op: FloatBinOp, a: Dynamic, b: Dynamic) -> Dy
     Dynamic::from_float(ty, res)
 }
 
+fn round_to_even(a: f64) -> f64 {
+    let b = a.floor();
+    if (a - b).abs() == 0.5f64 {
+        if (b as u64) & 1 == 0 {
+            b
+        } else {
+            b + 1f64
+        }
+    } else {
+        a.round()
+    }
+}
+
 fn interp_float_un(ty: FloatType, op: FloatUnOp, a: Dynamic) -> Dynamic {
     assert_eq!(a.get_type(), ty.to_type());
 
@@ -830,18 +843,7 @@ fn interp_float_un(ty: FloatType, op: FloatUnOp, a: Dynamic) -> Dynamic {
         FloatUnOp::Ceil => a.ceil(),
         FloatUnOp::Floor => a.floor(),
         FloatUnOp::Trunc => a.trunc(),
-        FloatUnOp::Nearest => {
-            let b = a.floor();
-            if (a - b).abs() == 0.5f64 {
-                if (b as u64) & 1 == 0 {
-                    b
-                } else {
-                    b + 1f64
-                }
-            } else {
-                a.round()
-            }
-        }
+        FloatUnOp::Nearest => round_to_even(a),
         FloatUnOp::Sqrt => a.sqrt(),
     };
 
@@ -865,21 +867,78 @@ fn interp_float_cmp(ty: FloatType, op: FloatCmpOp, a: Dynamic, b: Dynamic) -> Dy
     } { 1 } else { 0 })
 }
 
+fn next_f32(val: f32) -> f32 {
+    unsafe {
+        let u: u32 = mem::transmute(val);
+        mem::transmute(u.wrapping_add(1))
+    }
+}
+
+fn next_f64(val: f64) -> f64 {
+    unsafe {
+        let u: u64 = mem::transmute(val);
+        mem::transmute(u.wrapping_add(1))
+    }
+}
+
 fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dynamic) -> Option<Dynamic> {
     assert_eq!(a.get_type(), floattype.to_type());
 
-    let a = a.to_float();
-
-    if a.is_nan() {
-        None
-    } else {
-        Some(Dynamic::from_int(inttype, match (sign, inttype) {
-            (Sign::Signed, IntType::Int32) => u64_from_real_i32(a as i32),
-            (Sign::Unsigned, IntType::Int32) => Wrapping(a as u64),
-            (Sign::Signed, IntType::Int64) => u64_from_i64(Wrapping(a as i64)),
-            (Sign::Unsigned, IntType::Int64) => Wrapping(a as u64),
-        }.0))
+    if a.to_float().is_nan() {
+        return None;
     }
+
+    match (sign, inttype, a) {
+        (Sign::Signed, IntType::Int32, Dynamic::Float32(a)) => {
+            println!("a {} lower {} {} upper {} {}", a, -2147483648f32, next_f32(-2147483648f32), 2147483647f32, next_f32(2147483647f32));
+            if a >= next_f32(2147483647f32) || a <= next_f32(-2147483648f32) {
+                return None;
+            }
+        }
+        (Sign::Signed, IntType::Int32, Dynamic::Float64(a)) => {
+            if a >= next_f64(2147483647f64) || a <= next_f64(-2147483648f64) {
+                return None;
+            }
+        }
+        (Sign::Signed, IntType::Int64, Dynamic::Float32(a)) => {
+            if a >= next_f32(9223372036854775807f32) || a <= next_f32(-9223372036854775808f32) {
+                return None;
+            }
+        }
+        (Sign::Signed, IntType::Int64, Dynamic::Float64(a)) => {
+            if a >= next_f64(9223372036854775807f64) || a <= next_f64(-9223372036854775808f64) {
+                return None;
+            }
+        }
+        (Sign::Unsigned, IntType::Int32, Dynamic::Float32(a)) => {
+            if a >= next_f32(4294967295f32) || a < 0f32 {
+                return None;
+            }
+        }
+        (Sign::Unsigned, IntType::Int32, Dynamic::Float64(a)) => {
+            if a >= next_f64(4294967295f64) || a < 0f64 {
+                return None;
+            }
+        }
+        (Sign::Unsigned, IntType::Int64, Dynamic::Float32(a)) => {
+            if a >= next_f32(18446744073709551615f32) || a < 0f32 {
+                return None;
+            }
+        }
+        (Sign::Unsigned, IntType::Int64, Dynamic::Float64(a)) => {
+            if a >= next_f64(18446744073709551615f64) || a < 0f64 {
+                return None;
+            }
+        }
+        _ => panic!()
+    }
+
+    Some(Dynamic::from_int(inttype, match (sign, inttype) {
+        (Sign::Signed, IntType::Int32) => u64_from_real_i32(a.to_float() as i32),
+        (Sign::Unsigned, IntType::Int32) => Wrapping(a.to_float() as u64),
+        (Sign::Signed, IntType::Int64) => u64_from_i64(Wrapping(a.to_float() as i64)),
+        (Sign::Unsigned, IntType::Int64) => Wrapping(a.to_float() as u64),
+    }.0))
 }
 
 fn interp_int_extend(sign: Sign, a: Dynamic) -> Dynamic {
