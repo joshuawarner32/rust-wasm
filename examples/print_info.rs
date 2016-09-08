@@ -27,7 +27,7 @@ fn main() {
         println!("  {}.{}{}",
             str::from_utf8(i.module_name).unwrap(),
             str::from_utf8(i.function_name).unwrap(),
-            i.function_type);
+            m.types[i.function_type.0]);
     }
 
     println!("functions:");
@@ -35,7 +35,7 @@ fn main() {
         let name = m.names.get(i)
             .and_then(|e| str::from_utf8(e.function_name).ok())
             .unwrap_or("<unnamed>");
-        println!("  {}{}", name, f);
+        println!("  {}{}", name, m.types[f.0]);
 
         let code = &m.code[i];
 
@@ -54,7 +54,7 @@ fn main() {
             .and_then(|e| str::from_utf8(e.function_name).ok())
             .unwrap_or("<unnamed>");
         let ty = m.functions[e.function_index.0];
-        println!("  {} = {}{}", str::from_utf8(e.function_name).unwrap(), name, ty);
+        println!("  {} = {}{}", str::from_utf8(e.function_name).unwrap(), name, m.types[ty.0]);
     }
 
     println!("dynamic function table:");
@@ -63,7 +63,7 @@ fn main() {
             .and_then(|e| str::from_utf8(e.function_name).ok())
             .unwrap_or("<unnamed>");
         let ty = m.functions[t.0];
-        println!("  {} = {}{}", i, name, ty);
+        println!("  {} = {}{}", i, name, m.types[ty.0]);
     }
 
     println!("memory info:");
@@ -77,7 +77,7 @@ fn main() {
             .and_then(|e| str::from_utf8(e.function_name).ok())
             .unwrap_or("<unnamed>");
         let ty = m.functions[i.0];
-        println!("  {}{}", name, ty);
+        println!("  {}{}", name, m.types[ty.0]);
     } else {
         println!("  (None)");
     }

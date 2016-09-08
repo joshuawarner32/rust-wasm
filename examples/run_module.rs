@@ -3,6 +3,7 @@ extern crate wasm;
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::collections::HashMap;
 
 use wasm::Dynamic;
 
@@ -18,7 +19,7 @@ fn main() {
 
     let module = wasm::Module::parse(&contents);
 
-    let mut inst = wasm::Instance::new(&module);
+    let mut inst = wasm::Instance::new(&module, HashMap::new());
 
     let esp = module.find(b"establishStackSpace").unwrap();
     let main = module.find(b"_main").unwrap();
