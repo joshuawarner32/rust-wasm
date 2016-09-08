@@ -178,8 +178,10 @@ impl<'a, B: AsBytes> Instance<'a, B> {
             bound_instances.push(v);
         }
 
-        let mut bound_imports = module.imports.iter().map(|i| {
-            let instance_index = *instance_indices.get(i.module_name.as_bytes()).unwrap();
+        let bound_imports = module.imports.iter().map(|i| {
+            let instance_index = *instance_indices.get(i.module_name.as_bytes())
+                .unwrap_or_else(|| panic!("expected module {}", str::from_utf8(i.module_name.as_bytes())
+                    .unwrap_or("<bad_utf8>")));
             let export_index = bound_instances[instance_index]
                 .export_by_name_and_type(i.function_name.as_bytes(), module.types[i.function_type.0].as_ref());
             (instance_index, export_index)
