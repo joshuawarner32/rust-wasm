@@ -890,43 +890,50 @@ fn interp_float_to_int(floattype: FloatType, inttype: IntType, sign: Sign, a: Dy
 
     match (sign, inttype, a) {
         (Sign::Signed, IntType::Int32, Dynamic::Float32(a)) => {
-            println!("a {} lower {} {} upper {} {}", a, -2147483648f32, next_f32(-2147483648f32), 2147483647f32, next_f32(2147483647f32));
-            if a >= next_f32(2147483647f32) || a <= next_f32(-2147483648f32) {
+            let a = a.trunc();
+            if a >= 2147483648f32 || a <= next_f32(-2147483648f32) {
                 return None;
             }
         }
         (Sign::Signed, IntType::Int32, Dynamic::Float64(a)) => {
-            if a >= next_f64(2147483647f64) || a <= next_f64(-2147483648f64) {
+            let a = a.trunc();
+            if a >= 2147483648f64 || a <= next_f64(-2147483648f64) {
                 return None;
             }
         }
         (Sign::Signed, IntType::Int64, Dynamic::Float32(a)) => {
-            if a >= next_f32(9223372036854775807f32) || a <= next_f32(-9223372036854775808f32) {
+            let a = a.trunc();
+            if a >= 9223372036854775808f32 || a <= next_f32(-9223372036854775808f32) {
                 return None;
             }
         }
         (Sign::Signed, IntType::Int64, Dynamic::Float64(a)) => {
-            if a >= next_f64(9223372036854775807f64) || a <= next_f64(-9223372036854775808f64) {
+            let a = a.trunc();
+            if a >= 9223372036854775808f64 || a <= next_f64(-9223372036854775808f64) {
                 return None;
             }
         }
         (Sign::Unsigned, IntType::Int32, Dynamic::Float32(a)) => {
-            if a >= next_f32(4294967295f32) || a < 0f32 {
+            let a = a.trunc();
+            if a >= 4294967296f32 || a < 0f32 {
                 return None;
             }
         }
         (Sign::Unsigned, IntType::Int32, Dynamic::Float64(a)) => {
-            if a >= next_f64(4294967295f64) || a < 0f64 {
+            let a = a.trunc();
+            if a >= 4294967296f64 || a < 0f64 {
                 return None;
             }
         }
         (Sign::Unsigned, IntType::Int64, Dynamic::Float32(a)) => {
-            if a >= next_f32(18446744073709551615f32) || a < 0f32 {
+            let a = a.trunc();
+            if a >= 18446744073709551616f32 || a < 0f32 {
                 return None;
             }
         }
         (Sign::Unsigned, IntType::Int64, Dynamic::Float64(a)) => {
-            if a >= next_f64(18446744073709551615f64) || a < 0f64 {
+            let a = a.trunc();
+            if a >= 18446744073709551616f64 || a < 0f64 {
                 return None;
             }
         }
