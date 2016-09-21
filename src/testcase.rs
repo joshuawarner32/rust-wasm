@@ -10,7 +10,7 @@ use module::{AsBytes, Module, MemoryInfo, FunctionBuilder,
 use types::{Type, Dynamic, IntType, FloatType, Sign, Size};
 use ops::{LinearOp, NormalOp, IntBinOp, IntUnOp, IntCmpOp,
     FloatBinOp, FloatUnOp, FloatCmpOp, MemImm};
-use interp::{Instance, InterpResult, BoundInstance};
+use interp::{Instance, InterpResult, BoundInstance, Memory};
 use hexfloat;
 
 macro_rules! vec_form {
@@ -565,7 +565,7 @@ impl TestCase {
 struct SpecTestModule;
 
 impl BoundInstance for SpecTestModule {
-    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
+    fn invoke_export(&mut self, memory: &mut Memory, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
         for a in args {
             match a {
                 &Dynamic::Int32(v) => println!("print: {}", v),

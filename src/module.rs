@@ -114,6 +114,7 @@ impl<B: AsBytes> FunctionBody<B> {
     }
 }
 
+#[derive(Debug)]
 pub struct MemoryChunk<B: AsBytes> {
     pub offset: usize,
     pub data: B,
@@ -663,8 +664,9 @@ impl<'a> Module<&'a [u8]> {
 
         let mut r = Reader::new(data);
 
-        assert!(r.read_u32() == 0x6d736100);
-        assert!(r.read_u32() == 11);
+        assert_eq!(r.read_u32(), 0x6d736100);
+        let ver = r.read_u32();
+        assert_eq!(ver, 12);
 
         while !r.at_eof() {
             let c = read_chunk(&mut r);
@@ -702,13 +704,19 @@ impl<'a> Module<&'a [u8]> {
                         let mut ims = Vec::with_capacity(count);
 
                         for _ in 0..count {
-                            let ty = r.read_var_u32() as usize;
-                            assert!(ty < tys.len());
-                            ims.push(Import {
-                                function_type: TypeIndex(ty),
-                                module_name: r.read_bytes(),
-                                function_name: r.read_bytes()
-                            });
+                            let kind = r.read_var_u32();
+                            match kind {
+                                0 => {
+                                    let ty = r.read_var_u32() as usize;
+                                    assert!(ty < tys.len());
+                                    ims.push(Import {
+                                        function_type: TypeIndex(ty),
+                                        module_name: r.read_bytes(),
+                                        function_name: r.read_bytes()
+                                    });
+                                }
+                                _ => panic!("unknown kind {}", kind)
+                            }
                         }
                         imports = Some(ims);
                     } else {
@@ -762,7 +770,7 @@ impl<'a> Module<&'a [u8]> {
                     memory_info = Some(MemoryInfo {
                         initial_64k_pages: r.read_var_u32() as usize,
                         maximum_64k_pages: r.read_var_u32() as usize,
-                        is_exported: r.read_u8() == 1,
+                        is_exported: false // r.read_u8() == 1, // TODO!!!!!
                     });
                 }
                 b"export" => {
@@ -775,6 +783,8 @@ impl<'a> Module<&'a [u8]> {
                         let mut exp = Vec::with_capacity(count);
 
                         for _ in 0..count {
+                            let kind = r.read_var_u32();
+                            assert_eq!(kind, 0);
                             let ind = r.read_var_u32() as usize;
                             if ind >= fns.len() {
                                 panic!();
@@ -849,8 +859,11 @@ impl<'a> Module<&'a [u8]> {
                     let mut mc = Vec::with_capacity(count);
 
                     for _ in 0..count {
+                        assert_eq!(r.read_u8(), 0x10); // i32.const
+                        let offset = r.read_var_u32() as usize;
+                        assert_eq!(r.read_u8(), 0x0f); // end
                         mc.push(MemoryChunk {
-                            offset: r.read_var_u32() as usize,
+                            offset: offset,
                             data: r.read_bytes(),
                         });
                     }
@@ -883,33 +896,47 @@ impl<'a> Module<&'a [u8]> {
             }
         }
 
+        let mut missing = None;
+
         if let Some(types) = types {
             if let Some(imports) = imports {
                 if let Some(functions) = functions {
-                    if let Some(table) = table {
-                        if let Some(memory_info) = memory_info {
-                            if let Some(exports) = exports {
-                                if let Some(code) = code {
-                                    return Module {
-                                        types: types,
-                                        imports: imports,
-                                        functions: functions,
-                                        table: table,
-                                        memory_info: memory_info,
-                                        start_function_index: start_function_index,
-                                        exports: exports,
-                                        code: code,
-                                        memory_chunks: memory_chunks.unwrap_or(Vec::new()),
-                                        names: names.unwrap_or(Vec::new())
-                                    }
-                                }
+                    if let Some(memory_info) = memory_info {
+                        if let Some(exports) = exports {
+                            if let Some(code) = code {
+                                println!("got data: {:?}", memory_chunks);
+
+                                return Module {
+                                    types: types,
+                                    imports: imports,
+                                    functions: functions,
+                                    table: table.unwrap_or(Vec::new()),
+                                    memory_info: memory_info,
+                                    start_function_index: start_function_index,
+                                    exports: exports,
+                                    code: code,
+                                    memory_chunks: memory_chunks.unwrap_or(Vec::new()),
+                                    names: names.unwrap_or(Vec::new())
+                                };
+                            } else {
+                                missing = Some("code")
                             }
+                        } else {
+                            missing = Some("exports")
                         }
+                    } else {
+                        missing = Some("memory_info")
                     }
+                } else {
+                    missing = Some("functions")
                 }
+            } else {
+                missing = Some("imports")
             }
+        } else {
+            missing = Some("types")
         }
 
-        panic!("missing critical chunk!");
+        panic!("missing critical chunk: {}!", missing.unwrap());
     }
 }

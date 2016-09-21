@@ -106,6 +106,10 @@ impl Memory {
         }
     }
 
+    pub fn get_bytes(&self, range: ::std::ops::Range<u32>) -> &[u8] {
+        &self.0[range.start as usize .. range.end as usize]
+    }
+
 }
 
 #[test]
@@ -123,7 +127,7 @@ fn test_store_load() {
 }
 
 pub trait BoundInstance {
-    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult;
+    fn invoke_export(&mut self, memory: &mut Memory, func: ExportIndex, args: &[Dynamic]) -> InterpResult;
     fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex;
 }
 
@@ -149,7 +153,7 @@ pub enum InterpResult {
 }
 
 impl<'a, B: AsBytes> BoundInstance for Instance<'a, B> {
-    fn invoke_export(&mut self, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
+    fn invoke_export(&mut self, memory: &mut Memory, func: ExportIndex, args: &[Dynamic]) -> InterpResult {
         self.invoke(self.module.exports[func.0].function_index, args)
     }
     fn export_by_name_and_type(&self, name: &[u8], ty: FunctionType<&[u8]>) -> ExportIndex {
@@ -164,6 +168,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
         for m in &module.memory_chunks {
             let data = m.data.as_bytes();
+            println!("data: {:?}", data);
             let newlen = ::std::cmp::max(m.offset + data.len(), memory.len());
             memory.resize(newlen, 0);
             memory[m.offset..m.offset + data.len()].copy_from_slice(data);
@@ -434,7 +439,7 @@ impl<'a, B: AsBytes> Instance<'a, B> {
 
                             let (module, index) = context.instance.bound_imports[index.0];
                             println!("module {} index {}", module, index.0);
-                            match context.instance.bound_instances[module].invoke_export(index, args.as_slice()) {
+                            match context.instance.bound_instances[module].invoke_export(&mut context.instance.memory, index, args.as_slice()) {
                                 InterpResult::Value(v) => Res::Value(v),
                                 InterpResult::Trap => return Res::Trap,
                             }

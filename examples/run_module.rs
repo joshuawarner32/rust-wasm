@@ -37,7 +37,7 @@ fn main() {
 struct EmscriptenEnvModule;
 
 impl wasm::BoundInstance for EmscriptenEnvModule {
-    fn invoke_export(&mut self, func: wasm::ExportIndex, args: &[Dynamic]) -> wasm::InterpResult {
+    fn invoke_export(&mut self, memory: &mut wasm::Memory, func: wasm::ExportIndex, args: &[Dynamic]) -> wasm::InterpResult {
         match func.0 {
             0 => {
                 panic!("called abort");
@@ -117,7 +117,7 @@ impl wasm::BoundInstance for EmscriptenEnvModule {
 struct EmscriptenAsm2WasmModule;
 
 impl wasm::BoundInstance for EmscriptenAsm2WasmModule {
-    fn invoke_export(&mut self, func: wasm::ExportIndex, args: &[Dynamic]) -> wasm::InterpResult {
+    fn invoke_export(&mut self, memory: &mut wasm::Memory, func: wasm::ExportIndex, args: &[Dynamic]) -> wasm::InterpResult {
         for a in args {
             match a {
                 &Dynamic::Int32(v) => println!("print: {}", v),
